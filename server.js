@@ -4,7 +4,7 @@ const cors = require('cors');
 const fetch = require('node-fetch');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const { getCityForAgency, classifyCallType, translateCallType, parseAddress, parseNetDate, TEN_CODES } = require('./utils');
+const { getCityForAgency, classifyCallType, translateCallType, parseAddress, geocodeArcGIS, normalizeAddress, parseNetDate, TEN_CODES } = require('./utils');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,17 +46,24 @@ async function fetchIncidentsFallback() {
         const response = await fetch('https://secure2.hamiltoncounty.in.gov/DailyIncidents/Daily_Log/Incidents_Read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            body: 'sort=&group=&filter=&page=1&pageSize=500'
+            body: 'sort=DateTime-desc&group=&filter=&page=1&pageSize=500'
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
         const data = await response.json();
         const rawIncidents = data.Data || [];
-        const transformed = rawIncidents.map(raw => {
+        const transformed = await Promise.all(rawIncidents.slice(0, 100).map(async raw => {
             const dateTime = parseNetDate(raw.DateTime);
             if (!dateTime || isNaN(dateTime.getTime())) return null;
             const category = classifyCallType(raw.Call_Type, raw.Agency);
-            const coords = parseAddress(raw.Address, raw.Agency);
+
+            // Try high-accuracy ArcGIS first
+            let coords = await geocodeArcGIS(raw.Address, raw.Agency);
+            if (!coords) {
+                // Fallback to manual/fuzzy jitter
+                coords = parseAddress(raw.Address, raw.Agency);
+            }
+
             const city = getCityForAgency(raw.Agency);
             return {
                 id: raw.Incident_Number || `HC-${raw.ID}`,
@@ -69,10 +76,12 @@ async function fetchIncidentsFallback() {
                 timestamp: dateTime.toISOString(),
                 lat: coords ? coords.lat : null,
                 lng: coords ? coords.lng : null,
+                accuracy: coords ? (coords.accuracy || 'unknown') : 'none',
+                source: coords ? (coords.source || 'none') : 'none',
                 incident_number: raw.Incident_Number,
                 is_noblesville: ['Noblesville Fire', 'Noblesville Police'].includes(raw.Agency),
             };
-        }).filter(i => i !== null).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }));
         cachedIncidents = transformed;
         lastFetchTime = Date.now();
         return transformed;
@@ -96,16 +105,21 @@ app.get('/api/incidents', async (req, res) => {
             const { data, error } = await query;
             if (error) throw error;
 
-            result = (data || []).map(inc => {
+            result = await Promise.all((data || []).map(async (inc) => {
                 if (inc.lat === null || inc.lng === null) {
-                    const coords = parseAddress(inc.address, inc.agency);
+                    let coords = await geocodeArcGIS(inc.address, inc.agency);
+                    if (!coords) {
+                        coords = parseAddress(inc.address, inc.agency);
+                    }
                     if (coords) {
                         inc.lat = coords.lat;
                         inc.lng = coords.lng;
+                        inc.accuracy = coords.accuracy;
+                        inc.source = coords.source;
                     }
                 }
                 return inc;
-            });
+            }));
         } catch (e) {
             console.error("Supabase query error, falling back:", e.message);
             // Fall back to memory if DB query fails

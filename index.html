@@ -67,31 +67,91 @@
             </div>
         </div>
         <div class="top-bar-center">
-            <div class="status-badge" id="statusBadge">
-                <span class="status-dot"></span>
-                <span class="status-text">LIVE</span>
+            <div class="time-filter-wrapper" id="statusWrapper">
+                <button id="liveModeBtn" class="time-btn active" title="Live Events">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="statusText">LIVE</span>
+                </button>
+                <button id="historyModeBtn" class="time-btn" title="Historical Events">HISTORY</button>
             </div>
         </div>
         <div class="top-bar-right">
-            <div class="time-filter-wrapper">
-                <button id="liveModeBtn" class="time-btn active" title="Live Events">LIVE</button>
-                <button id="historyModeBtn" class="time-btn" title="Historical Events">HISTORY</button>
-                <input type="date" id="historyDate" class="history-date-input" style="display:none;" />
+            <!-- Header Filters -->
+            <div class="header-filters" id="headerFilters">
+                <button class="stat-card filter-tab active" data-filter="all" id="filterAll">
+                    <div class="stat-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M3 12h4l3 -9l5 18l3 -9h6" />
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="allCount">0</span>
+                        <span class="stat-label">All</span>
+                    </div>
+                </button>
+                <button class="stat-card filter-tab stat-traffic" data-filter="traffic" id="filterTraffic">
+                    <div class="stat-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71L12 2z" />
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="trafficCount">0</span>
+                        <span class="stat-label">Traffic</span>
+                    </div>
+                </button>
+                <button class="stat-card filter-tab stat-fire" data-filter="fire" id="filterFire">
+                    <div class="stat-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z" />
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="fireCount">0</span>
+                        <span class="stat-label">Fire</span>
+                    </div>
+                </button>
+                <button class="stat-card filter-tab stat-police" data-filter="police" id="filterPolice">
+                    <div class="stat-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" />
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="policeCount">0</span>
+                        <span class="stat-label">Police</span>
+                    </div>
+                </button>
+                <button class="stat-card filter-tab stat-ems" data-filter="ems" id="filterEms">
+                    <div class="stat-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="emsCount">0</span>
+                        <span class="stat-label">EMS</span>
+                    </div>
+                </button>
             </div>
-            <select id="cityFilter" class="city-select" title="Filter by City">
-                <option value="all">All Hamilton County</option>
-                <option value="Noblesville">Noblesville</option>
-                <option value="Carmel">Carmel</option>
-                <option value="Fishers">Fishers</option>
-                <option value="Westfield">Westfield</option>
-                <option value="Cicero">Cicero</option>
-                <option value="Sheridan">Sheridan</option>
-                <option value="Arcadia">Arcadia</option>
-                <option value="Atlanta">Atlanta</option>
-                <option value="County">County / Unincorp.</option>
-            </select>
             <div class="divider-v"></div>
             <div class="clock" id="clock"></div>
+            <button class="sidebar-toggle-btn" id="sidebarToggle" aria-label="Toggle sidebar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+                <span>Siren Feed</span>
+            </button>
         </div>
     </header>
 
@@ -129,7 +189,7 @@
                         <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"></path>
                     </svg>
                 </button>
-                <div class="map-control-divider"></div>
+
                 <button class="map-control-btn" id="heatmapToggleBtn" aria-label="Toggle Heatmap"
                     title="Show/hide Heatmap" style="display:none;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -139,34 +199,7 @@
                 </button>
             </div>
 
-            <!-- Audio Panel -->
-            <div class="audio-panel" id="audioPanel">
-                <div class="audio-panel-header" id="audioPanelToggle">
-                    <div class="audio-panel-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                            <line x1="12" y1="19" x2="12" y2="23"></line>
-                        </svg>
-                        <span>Scanner Audio</span>
-                    </div>
-                    <svg class="audio-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2">
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                </div>
-                <div class="audio-panel-body" id="audioPanelBody">
-                    <div class="audio-feed-list">
-                        <div class="audio-feed-embed"
-                            style="width:100%; height:50px; overflow:hidden; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                            <iframe src="https://www.broadcastify.com/webPlayer/3332" frameborder="0"
-                                style="width: 100%; height: 50px;" scrolling="no"></iframe>
-                        </div>
-                    </div>
-                    <p class="audio-note">Provided by Broadcastify embedded player</p>
-                </div>
-            </div>
+
 
             <!-- Map Legend -->
             <div class="map-legend">
@@ -183,80 +216,91 @@
                     <span>EMS</span>
                 </div>
             </div>
-            <!-- Floating Filters -->
-            <div class="map-filters" id="mapFilters">
-                <button class="stat-card filter-tab active" data-filter="all" id="filterAll">
-                    <div class="stat-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            class="icon icon-tabler icons-tabler-outline icon-tabler-activity">
-                            <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                            <path d="M3 12h4l3 -9l5 18l3 -9h6" />
-                        </svg>
+
+
+            <!-- Bottom Audio Bar (Live Mode) -->
+            <div class="audio-bar-wrapper" id="audioBarWrapper">
+                <div class="audio-bar-content">
+                    <div class="audio-info">
+                        <div class="audio-pulse">
+                            <span class="pulse-dot"></span>
+                        </div>
+                        <div class="audio-labels">
+                            <div class="audio-title">Hamilton County Dispatch</div>
+                            <div class="audio-subtitle">Live Fire & EMS Scanner Audio</div>
+                            <div class="audio-disclaimer">Note: Initial ad may play from source</div>
+                        </div>
                     </div>
-                    <div class="stat-info">
-                        <span class="stat-value" id="allCount">0</span>
-                        <span class="stat-label">All</span>
+                    <div class="audio-player">
+                        <audio controls>
+                            <source src="https://broadcastify.cdnstream1.com/3332" type="audio/mpeg">
+                        </audio>
                     </div>
-                </button>
-                <div class="filter-divider"></div>
-                <button class="stat-card filter-tab stat-fire" data-filter="fire" id="filterFire">
-                    <div class="stat-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            class="icon icon-tabler icons-tabler-outline icon-tabler-flame">
-                            <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                            <path
-                                d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z" />
-                        </svg>
-                    </div>
-                    <div class="stat-info">
-                        <span class="stat-value" id="fireCount">0</span>
-                        <span class="stat-label">Fire</span>
-                    </div>
-                </button>
-                <button class="stat-card filter-tab stat-police" data-filter="police" id="filterPolice">
-                    <div class="stat-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            class="icon icon-tabler icons-tabler-outline icon-tabler-shield-half">
-                            <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                            <path
-                                d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" />
-                            <path d="M12 3v18" />
-                        </svg>
-                    </div>
-                    <div class="stat-info">
-                        <span class="stat-value" id="policeCount">0</span>
-                        <span class="stat-label">Police</span>
-                    </div>
-                </button>
-                <button class="stat-card filter-tab stat-ems" data-filter="ems" id="filterEms">
-                    <div class="stat-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            class="icon icon-tabler icons-tabler-outline icon-tabler-ambulance">
-                            <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                            <path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
-                            <path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
-                            <path d="M5 17h-2v-11a1 1 0 0 1 1 -1h9v12m-4 0h6m4 0h2v-6h-8m0 -5h5l3 5" />
-                            <path d="M6 10h4m-2 -2v4" />
-                        </svg>
-                    </div>
-                    <div class="stat-info">
-                        <span class="stat-value" id="emsCount">0</span>
-                        <span class="stat-label">EMS</span>
-                    </div>
-                </button>
+                </div>
             </div>
 
-            <!-- Bottom Marquee -->
-            <div class="marquee-wrapper">
-                <div class="marquee-track" id="incidentMarquee">
-                    <!-- Incidents dynamically populated -->
+            <!-- Historical Controls Panel (History Mode) -->
+            <div class="history-panel" id="historyPanel" style="display:none;">
+                <div class="history-controls-left">
+                    <button id="prevDateBtn" class="date-nav-btn" aria-label="Previous Day">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                    </button>
+                    <div class="history-date-display">
+                        <div id="historyDateLabel" class="date-label">Today</div>
+                        <div id="historyDateSub" class="date-sub">Mar 1</div>
+                    </div>
+                    <button id="nextDateBtn" class="date-nav-btn" aria-label="Next Day">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="history-timeline-container">
+                    <div class="timeline-ticks" id="timelineTicks"></div>
+                    <div class="slider-track">
+                        <div class="slider-fill" id="sliderFill"></div>
+                    </div>
+                    <input type="range" id="historySlider" min="0" max="1440" value="1440" class="timeline-slider" />
+                    <div class="timeline-labels">
+                        <span>12 AM</span>
+                        <span>4 AM</span>
+                        <span>8 AM</span>
+                        <span>12 PM</span>
+                        <span>4 PM</span>
+                        <span>8 PM</span>
+                    </div>
+                </div>
+
+                <div class="history-time-display">
+                    <div id="historyTimeLabel" class="time-label">11:59 PM</div>
+                    <div class="time-sub">TIME</div>
                 </div>
             </div>
         </div>
+
+        <!-- Sidebar List View -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-header-left">
+                    <h2>Siren Feed</h2>
+                    <span class="sidebar-count" id="sidebarCount">0 selected</span>
+                </div>
+                <button class="sidebar-close-btn" id="sidebarClose" aria-label="Close sidebar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="incident-list" id="incidentList">
+                <!-- Cards dynamically populated -->
+            </div>
+        </aside>
     </main>
 
     <!-- Incident Detail Modal -->

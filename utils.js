@@ -1,3 +1,5 @@
+const fetch = require('node-fetch');
+
 const TEN_CODES = {
     '10-0': 'Fatality',
     '10-1': 'Signal Weak',
@@ -68,6 +70,8 @@ const CITY_CENTERS = {
     'Atlanta': { lat: 40.2140, lng: -86.0230 },
     'County': { lat: 40.0580, lng: -86.0500 },
 };
+
+const ARCGIS_BASE = 'https://gis1.hamiltoncounty.in.gov/arcgis/rest/services/HamCo911/FeatureServer';
 
 function getCityForAgency(agency) {
     if (!agency) return 'County';
@@ -254,6 +258,103 @@ function translateCallType(callType) {
     return result;
 }
 
+/**
+ * Normalizes CAD addresses for better geocoding accuracy.
+ */
+function normalizeAddress(address) {
+    if (!address) return '';
+    let clean = address.trim().toUpperCase()
+        .replace(/\s+/g, ' ')
+        .replace(/\d+\s+BLK\s+/, '') // Remove "BLK" prefix
+        .replace(/\//g, '&')        // Use & for intersections
+        .replace(/\bSR\b/g, 'STATE RD')
+        .replace(/\bST RD\b/g, 'STATE RD')
+        .replace(/\bHWY\b/g, 'HIGHWAY')
+        .replace(/\bINTERSTATE\b/g, 'I')
+        .replace(/\bUS\s*(\d+)\b/g, 'US HIGHWAY $1')
+        .trim();
+    return clean;
+}
+
+/**
+ * Attempts to geocode an address using Hamilton County ArcGIS FeatureServer.
+ */
+async function geocodeArcGIS(address, agency) {
+    if (!address || address === '<UNKNOWN>' || address === '') return null;
+
+    try {
+        const isIntersection = address.includes(' / ') || address.includes(' & ');
+        const layer = isIntersection ? 1 : 0; // Layer 1 = Intersections, Layer 0 = Address Points
+        const field = isIntersection ? 'LOC' : 'Add_Full';
+
+        // Clean up address for query
+        let queryAddr = normalizeAddress(address);
+
+        // Build query URL
+        const params = new URLSearchParams({
+            where: `${field} LIKE '%${queryAddr}%'`,
+            outFields: '*',
+            returnGeometry: 'true',
+            outSR: '4326',
+            f: 'json'
+        });
+
+        const response = await fetch(`${ARCGIS_BASE}/${layer}/query?${params.toString()}`);
+        if (!response.ok) throw new Error('ArcGIS query failed');
+
+        const data = await response.json();
+        if (data.features && data.features.length > 0) {
+            const feat = data.features[0];
+            return {
+                lat: feat.geometry.y,
+                lng: feat.geometry.x,
+                accuracy: 'high',
+                source: 'ArcGIS'
+            };
+        }
+
+        // Secondary attempt for addresses: split into number and street
+        if (!isIntersection) {
+            const numMatch = address.match(/^(\d+)/);
+            const streetMatch = address.match(/^\d+\s+BLK\s+(.+)$/) || address.match(/^\d+\s+(.+)$/);
+
+            if (numMatch && streetMatch) {
+                const num = numMatch[1];
+                const street = streetMatch[1].split(' ')[0]; // Just the first word of street
+
+                const fallbackParams = new URLSearchParams({
+                    where: `Add_Number = ${num} AND St_Name LIKE '${street}%'`,
+                    outFields: '*',
+                    returnGeometry: 'true',
+                    outSR: '4326',
+                    f: 'json'
+                });
+
+                const fallbackResp = await fetch(`${ARCGIS_BASE}/0/query?${fallbackParams.toString()}`);
+                const fallbackData = await fallbackResp.json();
+
+                if (fallbackData.features && fallbackData.features.length > 0) {
+                    return {
+                        lat: fallbackData.features[0].geometry.y,
+                        lng: fallbackData.features[0].geometry.x,
+                        accuracy: 'high',
+                        source: 'ArcGIS Fallback'
+                    };
+                }
+            }
+        }
+
+        return null;
+    } catch (err) {
+        console.error('Geocoding error:', err.message);
+        return null;
+    }
+}
+
+/**
+ * Synchronous fallback geocoding using local lookup.
+ * Adds random jitter to prevent stacked markers.
+ */
 function parseAddress(address, agency) {
     if (!address || address === '<UNKNOWN>' || address === '') return null;
 
@@ -272,13 +373,13 @@ function parseAddress(address, agency) {
             let offsetLat = 0, offsetLng = 0;
             if (blockNumber) {
                 const num = parseInt(blockNumber[1]);
-                offsetLat = ((num % 100) / 100) * 0.004 - 0.002;
-                offsetLng = ((num % 73) / 73) * 0.004 - 0.002;
+                offsetLat = ((num % 100) / 100) * 0.001 - 0.0005;
+                offsetLng = ((num % 73) / 73) * 0.001 - 0.0005;
             } else {
-                offsetLat = (Math.random() - 0.5) * 0.004;
-                offsetLng = (Math.random() - 0.5) * 0.004;
+                offsetLat = (Math.random() - 0.5) * 0.002;
+                offsetLng = (Math.random() - 0.5) * 0.002;
             }
-            return { lat: coords.lat + offsetLat, lng: coords.lng + offsetLng };
+            return { lat: coords.lat + offsetLat, lng: coords.lng + offsetLng, accuracy: 'low', source: 'Manual' };
         }
     }
 
@@ -287,7 +388,9 @@ function parseAddress(address, agency) {
     const center = CITY_CENTERS[city] || CITY_CENTERS['County'];
     return {
         lat: center.lat + (Math.random() - 0.5) * 0.02,
-        lng: center.lng + (Math.random() - 0.5) * 0.02
+        lng: center.lng + (Math.random() - 0.5) * 0.02,
+        accuracy: 'none',
+        source: 'CityCenter'
     };
 }
 
@@ -306,5 +409,8 @@ module.exports = {
     classifyCallType,
     translateCallType,
     parseAddress,
+    geocodeArcGIS,
+    normalizeAddress,
     parseNetDate
 };
+

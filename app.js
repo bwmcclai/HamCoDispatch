@@ -12,6 +12,7 @@ const POLL_INTERVAL_MS = 60 * 1000;
 const SCOPE_KEY = 'hamcoSiren_scope';
 
 const INCIDENT_TYPES = {
+    traffic: { label: 'Traffic', icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71L12 2z" /></svg>', color: '#94a3b8' },
     fire: { label: 'Fire', icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-flame"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z" /></svg>', color: '#ff6b35' },
     police: { label: 'Police', icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-shield-half"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" /><path d="M12 3v18" /></svg>', color: '#4ea8ff' },
     ems: { label: 'EMS', icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-ambulance"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M5 17h-2v-11a1 1 0 0 1 1 -1h9v12m-4 0h6m4 0h2v-6h-8m0 -5h5l3 5" /><path d="M6 10h4m-2 -2v4" /></svg>', color: '#4ade80' }
@@ -23,6 +24,7 @@ let markers = [];
 let stationMarkers = [];
 let incidents = [];
 let currentFilter = 'all';
+let visibleCats = { traffic: false, ems: true, fire: true, police: true }; // Master visibility toggles
 let miniMap = null;
 let isLoading = false;
 let lastUpdated = null;
@@ -35,6 +37,8 @@ let isHistoryMode = false;
 let historyDate = null;
 let heatLayer = null;
 let showHeatmap = false;
+let currentHistoryTime = 1440;
+const HISTORY_DURATIONS = { traffic: 60, fire: 240, police: 120, ems: 60 };
 
 // ── Utility ──
 function timeAgo(date) {
@@ -67,9 +71,18 @@ function formatAddress(address) {
 
 // ── Map Setup ──
 function initMap() {
+    // Hamilton County Boundaries (approximate precise rectangle)
+    const hamcoBounds = L.latLngBounds(
+        L.latLng(39.9272, -86.2366), // SouthWest (96th st / County Line Rd)
+        L.latLng(40.2268, -85.8744)  // NorthEast (296th st / Madison border)
+    );
+
     map = L.map('map', {
         center: HAMCO_CENTER,
         zoom: DEFAULT_ZOOM,
+        minZoom: 11,
+        maxBounds: hamcoBounds.pad(0.05), // Allow slight panning outside
+        maxBoundsViscosity: 0.9,
         zoomControl: false,
         attributionControl: true
     });
@@ -80,14 +93,35 @@ function initMap() {
         maxZoom: 19
     }).addTo(map);
 
+    // Create an inverted polygon to darken everything outside Hamilton County
+    const outerBounds = [
+        [-90, -180],
+        [90, -180],
+        [90, 180],
+        [-90, 180]
+    ];
+
+    const innerBounds = [
+        [39.9272, -86.2366], // SW
+        [40.2268, -86.2366], // NW
+        [40.2268, -85.8744], // NE
+        [39.9272, -85.8744], // SE
+    ];
+
+    L.polygon([outerBounds, innerBounds], {
+        color: 'transparent',
+        fillColor: '#0a0a0f', // Match app background
+        fillOpacity: 0.85,    // Fade out surrounding counties
+        stroke: false,
+        interactive: false
+    }).addTo(map);
+
     // Hamilton County boundary hint
-    L.circle(HAMCO_CENTER, {
-        radius: 18000,
-        color: 'rgba(255, 255, 255, 0.03)',
-        fillColor: 'rgba(255, 255, 255, 0.005)',
-        fillOpacity: 1,
+    L.rectangle(innerBounds, {
+        color: 'rgba(255, 255, 255, 0.1)',
+        fill: false,
         weight: 1,
-        dashArray: '8 4'
+        dashArray: '4 4'
     }).addTo(map);
 
     // Controls
@@ -106,7 +140,6 @@ function initMap() {
         else clearFireStations();
     });
 
-    // Heatmap toggle
     const heatmapBtn = document.getElementById('heatmapToggleBtn');
     if (heatmapBtn) {
         heatmapBtn.addEventListener('click', () => {
@@ -115,6 +148,7 @@ function initMap() {
             renderMapLayers();
         });
     }
+
 }
 
 // ── Fire Stations ──
@@ -160,21 +194,40 @@ function clearFireStations() {
 function createMarker(incident) {
     if (!incident.lat || !incident.lng) return null;
     const type = incident.type;
-    const ageMs = Date.now() - new Date(incident.timestamp).getTime();
-    const isRecent = ageMs < 3600000;
+
+    // In live mode, calculate actual age. In history mode, age relative to the timeline slider
+    let ageMs = 0;
+    if (isHistoryMode) {
+        const incMin = incident.timestamp.getHours() * 60 + incident.timestamp.getMinutes();
+        ageMs = (currentHistoryTime - incMin) * 60000;
+    } else {
+        ageMs = Date.now() - incident.timestamp.getTime();
+    }
+
+    // Time tiers for visual staleness
+    const isNew = ageMs < 1800000; // Under 30 mins
+    const isActive = ageMs < 3600000; // Under 1 hour
+    const isStale = ageMs >= 3600000; // Over 1 hour
+
+    let staleClass = '';
+    if (!isHistoryMode && isStale) staleClass = 'stale';
 
     const markerHtml = `
-        <div class="marker-pulse">
-            <div class="marker-pulse-ring ${type}" style="${isRecent ? '' : 'display:none'}"></div>
-            <div class="marker-dot ${type}"></div>
+        <div class="map-marker-container ${staleClass}">
+            ${isActive ? `<div class="marker-pulse-ring ${type} ${isNew ? 'fast-pulse' : ''}"></div>` : ''}
+            <div class="map-marker-badge ${type}">
+                ${INCIDENT_TYPES[type].icon}
+            </div>
+            ${isNew ? `<div class="map-marker-new-dot"></div>` : ''}
+            <div class="map-marker-pointer ${type}"></div>
         </div>
     `;
 
     const icon = L.divIcon({
         html: markerHtml,
         className: 'custom-marker',
-        iconSize: [30, 30],
-        iconAnchor: [15, 15]
+        iconSize: [36, 44],
+        iconAnchor: [18, 44]
     });
 
     const marker = L.marker([incident.lat, incident.lng], { icon }).addTo(map);
@@ -203,12 +256,42 @@ function removeAllMarkers() {
 }
 
 function updateMarkersVisibility() {
-    if (showHeatmap) {
-        markers.forEach(m => m.setOpacity(0)); // Hidden when heatmap is active
-        return;
-    }
     markers.forEach(m => {
-        m.setOpacity(currentFilter === 'all' || m.incidentType === currentFilter ? 1 : 0.12);
+        const inc = incidents.find(i => i.id === m.incidentId);
+        let opacity = (currentFilter === 'all' || m.incidentType === currentFilter) ? 1 : 0.12;
+
+        if (inc) {
+            // Updated filtering logic using primary types
+            if (inc.type === 'traffic' && !visibleCats.traffic && currentFilter === 'all') {
+                opacity = 0;
+            } else if (currentFilter !== 'all' && m.incidentType !== currentFilter) {
+                opacity = 0.12;
+            } else if (inc.type === 'ems' && !visibleCats.ems && currentFilter === 'all') {
+                opacity = 0;
+            } else if (inc.type === 'fire' && !visibleCats.fire && currentFilter === 'all') {
+                opacity = 0;
+            } else if (inc.type === 'police' && !visibleCats.police && currentFilter === 'all') {
+                opacity = 0;
+            }
+        }
+
+        if (isHistoryMode) {
+            const inc = incidents.find(i => i.id === m.incidentId);
+            if (inc) {
+                const incMin = inc.timestamp.getHours() * 60 + inc.timestamp.getMinutes();
+                if (incMin > currentHistoryTime) {
+                    opacity = 0;
+                } else if (currentHistoryTime - incMin > HISTORY_DURATIONS[inc.type]) {
+                    opacity = 0;
+                }
+            }
+        }
+
+        if (showHeatmap) {
+            m.setOpacity(0);
+        } else {
+            m.setOpacity(opacity);
+        }
     });
 }
 
@@ -219,10 +302,28 @@ function renderMapLayers() {
     }
 
     if (showHeatmap && L.heatLayer) {
-        const heatData = incidents
+        let heatIncidents = incidents
             .filter(inc => inc.lat && inc.lng)
-            .filter(inc => currentFilter === 'all' || inc.type === currentFilter)
-            .map(inc => [inc.lat, inc.lng, 1]); // default intensity
+            .filter(inc => currentFilter === 'all' || inc.type === currentFilter);
+
+        if (currentFilter === 'all') {
+            heatIncidents = heatIncidents.filter(inc => {
+                if (inc.type === 'traffic') return visibleCats.traffic;
+                if (inc.type === 'ems') return visibleCats.ems;
+                if (inc.type === 'fire') return visibleCats.fire;
+                if (inc.type === 'police') return visibleCats.police;
+                return true;
+            });
+        }
+
+        if (isHistoryMode) {
+            heatIncidents = heatIncidents.filter(inc => {
+                const incMin = inc.timestamp.getHours() * 60 + inc.timestamp.getMinutes();
+                return incMin <= currentHistoryTime && (currentHistoryTime - incMin) <= HISTORY_DURATIONS[inc.type];
+            });
+        }
+
+        const heatData = heatIncidents.map(inc => [inc.lat, inc.lng, 1]);
 
         heatLayer = L.heatLayer(heatData, {
             radius: 20,
@@ -242,21 +343,20 @@ async function fetchIncidents() {
 
     try {
         const params = new URLSearchParams();
-        const cityFilter = document.getElementById('cityFilter').value;
-        if (cityFilter !== 'all') {
-            params.set('city', cityFilter);
-        }
 
         if (isHistoryMode && historyDate) {
-            const start = new Date(historyDate);
+            const start = new Date(historyDate + 'T00:00:00');
             start.setHours(0, 0, 0, 0);
-            const end = new Date(historyDate);
+            const end = new Date(historyDate + 'T00:00:00');
             end.setHours(23, 59, 59, 999);
             params.set('start', start.toISOString());
             params.set('end', end.toISOString());
             params.set('limit', '5000'); // fetch more for historical mode
         } else {
-            params.set('limit', '200');
+            const start = new Date();
+            start.setHours(start.getHours() - 6); // Drastic reduction: 6h instead of 24h
+            params.set('start', start.toISOString());
+            params.set('limit', '500');
         }
 
         const response = await fetch(`${API_BASE}/api/incidents?${params.toString()}`);
@@ -275,15 +375,23 @@ async function fetchIncidents() {
             }
         });
 
-        incidents = data.incidents.map(inc => ({
-            ...inc,
-            timestamp: new Date(inc.timestamp),
-            _isNew: newIds.includes(inc.id) && !isFirstLoad
-        }));
+        incidents = data.incidents.map(inc => {
+            let type = inc.type;
+            if (inc.raw_call_type && inc.raw_call_type.includes('Traffic Stop')) {
+                type = 'traffic';
+            }
+            return {
+                ...inc,
+                type: type,
+                timestamp: new Date(inc.timestamp),
+                _isNew: newIds.includes(inc.id) && !isFirstLoad
+            };
+        });
 
         removeAllMarkers();
         incidents.forEach(inc => createMarker(inc));
-        renderMarquee();
+        renderIncidentList();
+        if (typeof renderTimelineTicks === 'function') renderTimelineTicks();
         updateStats();
         renderMapLayers(); // Update the heatmap and markers
         updateStatusBadge(isHistoryMode ? 'history' : 'live');
@@ -319,22 +427,34 @@ function flashNewIncidents(newIds) {
 
 // ── Status Badge ──
 function updateStatusBadge(state) {
-    const badge = document.getElementById('statusBadge');
-    const dot = badge.querySelector('.status-dot');
-    const text = badge.querySelector('.status-text');
-    const styles = {
-        live: { bg: '#4ade80', shadow: 'rgba(74,222,128,0.6)', label: 'LIVE', border: 'rgba(74,222,128,0.2)', bgBadge: 'rgba(74,222,128,0.08)' },
-        history: { bg: '#8b5cf6', shadow: 'rgba(139,92,246,0.6)', label: 'HISTORY', border: 'rgba(139,92,246,0.2)', bgBadge: 'rgba(139,92,246,0.08)' },
-        loading: { bg: '#facc15', shadow: 'rgba(250,204,21,0.6)', label: 'UPDATING', border: 'rgba(250,204,21,0.2)', bgBadge: 'rgba(250,204,21,0.08)' },
-        error: { bg: '#f87171', shadow: 'rgba(248,113,113,0.6)', label: 'OFFLINE', border: 'rgba(248,113,113,0.2)', bgBadge: 'rgba(248,113,113,0.08)' }
-    };
-    const s = styles[state];
-    dot.style.background = s.bg;
-    dot.style.boxShadow = `0 0 8px ${s.shadow}`;
-    text.textContent = s.label;
-    text.style.color = s.bg;
-    badge.style.borderColor = s.border;
-    badge.style.background = s.bgBadge;
+    const dot = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+    if (!dot || !text) return;
+
+    dot.style.animation = 'none';
+
+    if (state === 'live') {
+        dot.style.background = '#4ade80';
+        dot.style.boxShadow = '0 0 8px rgba(74,222,128,0.6)';
+        text.textContent = 'LIVE';
+        text.style.color = 'inherit';
+        dot.style.animation = 'livePulse 2s ease-in-out infinite';
+    } else if (state === 'history') {
+        dot.style.background = 'transparent';
+        dot.style.boxShadow = 'none';
+        text.textContent = 'LIVE';
+        text.style.color = 'inherit';
+    } else if (state === 'loading') {
+        dot.style.background = '#facc15';
+        dot.style.boxShadow = '0 0 8px rgba(250,204,21,0.6)';
+        text.textContent = 'UPDATING';
+        text.style.color = '#facc15';
+    } else if (state === 'error') {
+        dot.style.background = '#f87171';
+        dot.style.boxShadow = '0 0 8px rgba(248,113,113,0.6)';
+        text.textContent = 'OFFLINE';
+        text.style.color = '#f87171';
+    }
 }
 
 function showOfflineNotice() {
@@ -395,38 +515,61 @@ function renderIncidentCard(incident, index) {
     return card;
 }
 
-function renderMarquee() {
-    const track = document.getElementById('incidentMarquee');
-    track.innerHTML = '';
-    const filtered = currentFilter === 'all' ? incidents : incidents.filter(i => i.type === currentFilter);
+function renderIncidentList() {
+    const list = document.getElementById('incidentList');
+    if (!list) return;
+    list.innerHTML = '';
+
+    let filtered = currentFilter === 'all' ? incidents : incidents.filter(i => i.type === currentFilter);
+
+    // Filter by master visibility toggles in "All" mode
+    if (currentFilter === 'all') {
+        filtered = filtered.filter(inc => {
+            if (inc.type === 'traffic') return visibleCats.traffic;
+            if (inc.type === 'ems') return visibleCats.ems;
+            if (inc.type === 'fire') return visibleCats.fire;
+            if (inc.type === 'police') return visibleCats.police;
+            return true;
+        });
+    }
+
+    // In history mode, only show incidents that are visible on the map (before/at current time)
+    if (isHistoryMode) {
+        filtered = filtered.filter(inc => {
+            const incMin = inc.timestamp.getHours() * 60 + inc.timestamp.getMinutes();
+            return incMin <= currentHistoryTime;
+        });
+    }
+
+    // Sort by timestamp descending (newest first)
+    filtered.sort((a, b) => b.timestamp - a.timestamp);
 
     if (filtered.length === 0) {
-        track.innerHTML = `
-            <div style="color:var(--text-secondary); padding: 10px; font-size: 0.8rem; font-weight: 500;">
-                ${currentFilter !== 'all' ? `No ${currentFilter} incidents.` : 'Monitoring Hamilton County...'}
+        list.innerHTML = `
+            <div class="empty-state" style="padding: 40px 20px; text-align: center; opacity: 0.5;">
+                <p style="font-size: 0.85rem;">${currentFilter !== 'all' ? `No recent ${currentFilter} incidents.` : 'Monitoring Hamilton County...'}</p>
             </div>
         `;
+        document.getElementById('sidebarCount').textContent = '0 total';
         return;
     }
 
-    const createCards = () => {
-        filtered.forEach((incident, index) => {
-            track.appendChild(renderIncidentCard(incident, index));
-        });
-    };
+    filtered.forEach((incident, index) => {
+        list.appendChild(renderIncidentCard(incident, index));
+    });
 
-    const copies = Math.max(2, Math.ceil(15 / Math.max(1, filtered.length)));
-    for (let i = 0; i < copies; i++) createCards();
-
-    const duration = Math.max(20, filtered.length * copies * 4) + 's';
-    track.style.animationDuration = duration;
+    document.getElementById('sidebarCount').textContent = `${filtered.length} total`;
 }
 
 function updateStats() {
     animateCounter('allCount', incidents.length);
+    animateCounter('trafficCount', incidents.filter(i => i.type === 'traffic').length);
     animateCounter('fireCount', incidents.filter(i => i.type === 'fire').length);
     animateCounter('policeCount', incidents.filter(i => i.type === 'police').length);
     animateCounter('emsCount', incidents.filter(i => i.type === 'ems').length);
+
+    // Also refresh the list if filter changed
+    renderIncidentList();
 }
 
 function animateCounter(id, target) {
@@ -492,25 +635,76 @@ function initFilters() {
             document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             currentFilter = tab.dataset.filter;
-            renderMarquee();
-            renderMapLayers(); // Update layers instead of just markers
+            renderIncidentList();
+            renderMapLayers();
         });
     });
+}
+
+function renderTimelineTicks() {
+    const ticksContainer = document.getElementById('timelineTicks');
+    if (!ticksContainer) return;
+    ticksContainer.innerHTML = '';
+
+    if (!isHistoryMode) return;
+
+    incidents.forEach(inc => {
+        const incMin = inc.timestamp.getHours() * 60 + inc.timestamp.getMinutes();
+        const percent = (incMin / 1440) * 100;
+        const tick = document.createElement('div');
+        tick.className = `timeline-tick ${inc.type}`;
+        tick.style.left = `${percent}%`;
+        ticksContainer.appendChild(tick);
+    });
+}
+
+function updateHistoryUI() {
+    // Safely parse YYYY-MM-DD as local date
+    const [year, month, day] = historyDate.split('-').map(Number);
+    const localDate = new Date(year, month - 1, day);
+    const today = new Date();
+
+    const isToday = localDate.toDateString() === today.toDateString();
+    const lbl = document.getElementById('historyDateLabel');
+    const sub = document.getElementById('historyDateSub');
+    if (lbl) lbl.textContent = isToday ? 'Today' : localDate.toLocaleDateString('en-US', { weekday: 'short' });
+    if (sub) sub.textContent = localDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+    const hours = Math.floor(currentHistoryTime / 60);
+    const mins = currentHistoryTime % 60;
+    const isPM = hours >= 12;
+    const displayHours = (hours % 12) || 12; // 0 should be 12
+    const strTime = `${displayHours}:${mins.toString().padStart(2, '0')} ${isPM ? 'PM' : 'AM'}`;
+    const timeLbl = document.getElementById('historyTimeLabel');
+    if (timeLbl) timeLbl.textContent = strTime;
+
+    const percent = (currentHistoryTime / 1440) * 100;
+    const fill = document.getElementById('sliderFill');
+    if (fill) fill.style.width = `${percent}%`;
+    const slider = document.getElementById('historySlider');
+    if (slider) slider.value = currentHistoryTime;
 }
 
 function initTimeFilter() {
     const liveBtn = document.getElementById('liveModeBtn');
     const historyBtn = document.getElementById('historyModeBtn');
-    const dateInput = document.getElementById('historyDate');
     const heatmapBtn = document.getElementById('heatmapToggleBtn');
 
-    if (!liveBtn || !historyBtn || !dateInput) return;
+    const audioBarWrapper = document.getElementById('audioBarWrapper');
+    const historyPanel = document.getElementById('historyPanel');
+    const prevDateBtn = document.getElementById('prevDateBtn');
+    const nextDateBtn = document.getElementById('nextDateBtn');
+    const historySlider = document.getElementById('historySlider');
+
+    if (!liveBtn || !historyBtn) return;
 
     liveBtn.addEventListener('click', () => {
         isHistoryMode = false;
         liveBtn.classList.add('active');
         historyBtn.classList.remove('active');
-        dateInput.style.display = 'none';
+
+        if (audioBarWrapper) audioBarWrapper.style.display = 'flex';
+        if (historyPanel) historyPanel.style.display = 'none';
 
         if (heatmapBtn) {
             heatmapBtn.style.display = 'none';
@@ -521,61 +715,102 @@ function initTimeFilter() {
         knownIncidentIds.clear();
         isFirstLoad = true;
         fetchIncidents();
+        renderIncidentList(); // Immediate refresh
+        renderMapLayers();    // Refresh markers
     });
 
     historyBtn.addEventListener('click', () => {
         isHistoryMode = true;
         historyBtn.classList.add('active');
         liveBtn.classList.remove('active');
-        dateInput.style.display = 'inline-block';
+
+        if (audioBarWrapper) audioBarWrapper.style.display = 'none';
+        if (historyPanel) historyPanel.style.display = 'flex';
 
         if (heatmapBtn) {
-            heatmapBtn.style.display = 'inline-flex';
-            showHeatmap = true; // Auto enable heatmap for history
-            heatmapBtn.classList.add('active');
+            heatmapBtn.style.display = 'none';
+            showHeatmap = false;
+            heatmapBtn.classList.remove('active');
         }
 
-        if (!dateInput.value) {
-            // Set to yesterday by default when entering history mode
+        if (!historyDate) {
             const d = new Date();
-            d.setDate(d.getDate() - 1);
-            dateInput.value = d.toISOString().split('T')[0];
-            historyDate = dateInput.value;
-        } else {
-            historyDate = dateInput.value;
+            const pad = n => n.toString().padStart(2, '0');
+            historyDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
         }
+
+        currentHistoryTime = 1440; // Default to end of day
+        updateHistoryUI();
 
         knownIncidentIds.clear();
         isFirstLoad = true;
         fetchIncidents();
+        renderIncidentList(); // Immediate refresh
+        renderMapLayers();    // Refresh markers
     });
 
-    dateInput.addEventListener('change', (e) => {
-        historyDate = e.target.value;
-        if (isHistoryMode) {
+    if (prevDateBtn && nextDateBtn) {
+        prevDateBtn.addEventListener('click', () => {
+            const [year, month, day] = historyDate.split('-').map(Number);
+            const d = new Date(year, month - 1, day - 1);
+            const pad = n => n.toString().padStart(2, '0');
+            historyDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+            updateHistoryUI();
             knownIncidentIds.clear();
             isFirstLoad = true;
             fetchIncidents();
-        }
-    });
-}
+        });
 
-// ── City Filter ──
-function initCityFilter() {
-    const cityFilter = document.getElementById('cityFilter');
-    if (!cityFilter) return;
+        nextDateBtn.addEventListener('click', () => {
+            const [year, month, day] = historyDate.split('-').map(Number);
+            const currentD = new Date(year, month - 1, day);
+            const today = new Date();
+            if (currentD.toDateString() === today.toDateString()) return; // Don't allow future
 
-    const saved = localStorage.getItem('hamcoSiren_city');
-    if (saved) {
-        cityFilter.value = saved;
+            const nextD = new Date(year, month - 1, day + 1);
+            const pad = n => n.toString().padStart(2, '0');
+            historyDate = `${nextD.getFullYear()}-${pad(nextD.getMonth() + 1)}-${pad(nextD.getDate())}`;
+
+            updateHistoryUI();
+            knownIncidentIds.clear();
+            isFirstLoad = true;
+            fetchIncidents();
+        });
     }
 
-    cityFilter.addEventListener('change', () => {
-        localStorage.setItem('hamcoSiren_city', cityFilter.value);
-        knownIncidentIds.clear();
-        isFirstLoad = true;
-        fetchIncidents();
-    });
+    if (historySlider) {
+        historySlider.addEventListener('input', (e) => {
+            currentHistoryTime = parseInt(e.target.value, 10);
+            updateHistoryUI();
+            renderMapLayers(); // Re-render for new time
+            renderIncidentList(); // Sync list with slider
+        });
+    }
+}
+
+
+
+// ── Sidebar Toggle ──
+function initSidebarToggle() {
+    const toggle = document.getElementById('sidebarToggle');
+    const sidebar = document.getElementById('sidebar');
+    const closeBtn = document.getElementById('sidebarClose');
+    if (!sidebar) return;
+
+    if (toggle) {
+        toggle.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+            sidebar.classList.toggle('collapsed');
+        });
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            sidebar.classList.add('collapsed');
+        });
+    }
 }
 
 // ── Audio Panel ──
@@ -600,12 +835,12 @@ async function init() {
     initMap();
     initFilters();
     initTimeFilter();
-    initCityFilter();
     initAudioPanel();
+    initSidebarToggle();
     updateClock();
 
-    document.getElementById('incidentMarquee').innerHTML = `
-        <div style="color:var(--text-secondary); padding: 10px; font-size: 0.8rem; font-weight: 500;">Loading Incidents...</div>
+    document.getElementById('incidentList').innerHTML = `
+        <div style="color:var(--text-secondary); padding: 40px 20px; text-align: center; font-size: 0.85rem; font-weight: 500;">Connecting to Siren Feed...</div>
     `;
 
     await fetchIncidents();

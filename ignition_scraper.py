@@ -2,11 +2,17 @@ import system
 import datetime
 import json
 import base64
+import urllib
+import re
 
 # === Configuration ===
 SUPABASE_URL = "https://atcwvurzrdfhceqmqgnv.supabase.co"
 SUPABASE_KEY = "sb_publishable_Wi1WkXEmcyJl99lAypqUYw_D5uvE9Ve"
 HAMCO_API_URL = "https://secure2.hamiltoncounty.in.gov/DailyIncidents/Daily_Log/Incidents_Read"
+ARCGIS_BASE = "https://gis1.hamiltoncounty.in.gov/arcgis/rest/services/HamCo911/FeatureServer"
+
+# Local cache for this single execution to prevent double-probing the same address
+GEO_CACHE = {}
 
 # === 10-Code Reference ===
 TEN_CODES = {
@@ -28,6 +34,73 @@ TEN_CODES = {
 }
 
 # === Utils ===
+def normalize_address(address):
+    if not address: return ""
+    clean = address.strip().upper()
+    clean = re.sub(r'\d+\s+BLK\s+', '', clean)
+    clean = clean.replace('/', '&')
+    clean = re.sub(r'\bSR\b', 'STATE RD', clean)
+    clean = re.sub(r'\bST RD\b', 'STATE RD', clean)
+    clean = re.sub(r'\bHWY\b', 'HIGHWAY', clean)
+    clean = re.sub(r'\bUS\s*(\d+)\b', r'US HIGHWAY \1', clean)
+    return clean.strip()
+
+def get_arcgis_coords(address):
+    if not address or address in ["<UNKNOWN>", ""]: return None
+    
+    # Check local cache first
+    norm = normalize_address(address)
+    if norm in GEO_CACHE: return GEO_CACHE[norm]
+    
+    try:
+        is_intersection = " / " in address or " & " in address
+        layer = 1 if is_intersection else 0
+        field = "LOC" if is_intersection else "Add_Full"
+        
+        # Build Query
+        where_clause = "%s LIKE '%%%s%%'" % (field, norm)
+        params = urllib.urlencode({
+            "where": where_clause, "outFields": "*", "returnGeometry": "true", "outSR": "4326", "f": "json"
+        })
+        
+        url = "%s/%d/query?%s" % (ARCGIS_BASE, layer, params)
+        # Add a tight timeout (2s) to prevent script hanging
+        res_raw = system.net.httpGet(url, 2000, 2000)
+        data = system.util.jsonDecode(res_raw)
+        
+        if data.get("features"):
+            geom = data["features"][0].get("geometry", {})
+            coords = {"lat": geom.get("y"), "lng": geom.get("x")}
+            GEO_CACHE[norm] = coords
+            return coords
+            
+        # Fallback for addresses: split number and street
+        if not is_intersection:
+            num_match = re.search(r'^(\d+)', address)
+            street_match = re.search(r'^\d+\s+BLK\s+(.+)$', address) or re.search(r'^\d+\s+(.+)$', address)
+            
+            if num_match and street_match:
+                num = num_match.group(1)
+                street = street_match.group(1).split(" ")[0]
+                
+                where_clause = "Add_Number = %s AND St_Name LIKE '%s%%'" % (num, street)
+                params = urllib.urlencode({
+                    "where": where_clause, "outFields": "*", "returnGeometry": "true", "outSR": "4326", "f": "json"
+                })
+                url = "%s/0/query?%s" % (ARCGIS_BASE, params)
+                res_raw = system.net.httpGet(url, 2000, 2000)
+                data = system.util.jsonDecode(res_raw)
+                
+                if data.get("features"):
+                    geom = data["features"][0].get("geometry", {})
+                    coords = {"lat": geom.get("y"), "lng": geom.get("x")}
+                    GEO_CACHE[norm] = coords
+                    return coords
+                    
+        return None
+    except:
+        return None
+
 def get_city_for_agency(agency):
     if not agency: return 'County'
     ag = agency.lower()
@@ -46,7 +119,6 @@ def classify_call_type(call_type, agency):
     if any(x in ct for x in ['FIRE', 'STRUCTURE', 'BRUSH', 'SMOKE', 'GAS LEAK', 'CO ALARM', 'HAZMAT', '10-70']): return 'fire'
     if ct.startswith('M ') or ct.startswith('M-'): return 'ems'
     if any(x in ct for x in ['MEDICAL', 'STROKE', 'CARDIAC', 'OVERDOSE', 'BREATHING', 'TRAUMA', '10-52', '10-0']): return 'ems'
-    
     if agency:
         ag = agency.upper()
         if 'FIRE' in ag or 'EMS' in ag:
@@ -62,7 +134,6 @@ def translate_call_type(call_type):
 
 def parse_net_date(date_str):
     try:
-        # Extracts 1234567890000 from "/Date(1234567890000)/"
         timestamp = int(date_str[6:-2])
         return system.date.fromMillis(timestamp)
     except:
@@ -71,61 +142,60 @@ def parse_net_date(date_str):
 # === Main Script ===
 try:
     # 1. Fetch from Hamilton County
-    postData = "sort=&group=&filter=&page=1&pageSize=500"
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "application/json",
-        "X-Requested-With": "XMLHttpRequest"
-    }
+    postData = "sort=DateTime-desc&group=&filter=&page=1&pageSize=500"
+    headers = { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
     
     response = system.net.httpPost(HAMCO_API_URL, "application/x-www-form-urlencoded", postData, headerValues=headers, throwOnError=False)
     data = system.util.jsonDecode(response)
     raw_incidents = data.get("Data", [])
     
     transformed = []
+    geo_count = 0
+    max_geo = 20 # Only geocode top 20 fresh incidents per run to keep it snappy
     
     # 2. Transform the data
     for raw in raw_incidents:
         try:
             timestamp = parse_net_date(raw.get("DateTime", ""))
-            # Use 'Z' for Java backwards compatibility (RFC 822 Timezone like -0500 which Postgres accepts)
             iso_time = system.date.format(timestamp, "yyyy-MM-dd'T'HH:mm:ss.SSSZ")
             
             call_type = raw.get("Call_Type", "")
             agency = raw.get("Agency", "")
+            address = raw.get("Address", "Address Pending")
             
-            # Construct dictionary, omitting lat/lng explicitly so Postgres safely assumes DEFAULT (NULL)
-            # Casting all elements to safe pure-Python strings/booleans specifically so json.dumps doesn't choke on Java Objects
+            # Geocoding with local cache check
+            lat, lng = None, None
+            if geo_count < max_geo:
+                coords = get_arcgis_coords(address)
+                if coords:
+                    lat, lng = coords["lat"], coords["lng"]
+                    geo_count += 1
+            
             incident_id = str(raw.get("Incident_Number") or ("HC-" + str(raw.get("ID", ""))))
             incident = {
                 "id": incident_id,
                 "type": str(classify_call_type(call_type, agency)),
                 "description": str(translate_call_type(call_type)),
                 "raw_call_type": str(call_type),
-                "address": str(raw.get("Address", "Address Pending")),
+                "address": str(address),
                 "agency": str(agency),
                 "city": str(get_city_for_agency(agency)),
                 "timestamp": str(iso_time),
                 "incident_number": str(raw.get("Incident_Number", "")),
-                "is_noblesville": bool(agency in ["Noblesville Fire", "Noblesville Police"])
+                "is_noblesville": bool(agency in ["Noblesville Fire", "Noblesville Police"]),
+                "lat": lat, "lng": lng
             }
             transformed.append(incident)
-        except Exception, parseErr:
-            print("Error parsing row: " + str(parseErr))
+        except Exception: pass
 
-    if not transformed:
-        print("No incidents to insert.")
-        
-    else:
-        # Deduplicate transformed list by ID to prevent Postgres 21000 ON CONFLICT ON UPDATE errors
+    if transformed:
         unique_incidents = {}
         for inc in transformed:
             unique_incidents[inc["id"]] = inc
         final_payload = unique_incidents.values()
 
-        # 3. Upsert into Supabase REST API
+        # 3. Upsert into Supabase
         supabase_endpoint = SUPABASE_URL + "/rest/v1/incidents?on_conflict=id"
-        
         supabase_headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": "Bearer " + SUPABASE_KEY,
@@ -133,54 +203,15 @@ try:
             "Prefer": "resolution=merge-duplicates"
         }
         
-        # We use python's json.dumps because Ignition's system.util.jsonEncode can sometimes swallow Python None/Lists
-        json_payload = json.dumps(final_payload)
+        system.net.httpPost(supabase_endpoint, "application/json", json.dumps(final_payload), 10000, 10000, "", "", supabase_headers, False, False)
         
-        # Use positional arguments for backwards compatibility in older versions of Ignition (in case kwargs fail silently)
-        # signature: system.net.httpPost(url, contentType, postData, connectTimeout, readTimeout, username, password, headerValues, bypassCertValidation, throwOnError)
-        supabase_res = system.net.httpPost(
-            supabase_endpoint,          # url
-            "application/json",         # contentType
-            json_payload,               # postData
-            10000,                      # connectTimeout
-            10000,                      # readTimeout
-            "",                         # username
-            "",                         # password
-            supabase_headers,           # headerValues
-            False,                      # bypassCertValidation
-            False                       # throwOnError
-        )
-        
-        # Inspect Supabase's actual output! Usually an empty string "" means it succeeded
-        print("Supabase returned: " + str(supabase_res))
-        
-        if "message" in str(supabase_res) and "code" in str(supabase_res):
-            print("WARNING: Data may have been rejected! " + str(supabase_res))
-        else:
-            print("Successfully processed " + str(len(final_payload)) + " incidents.")
-
-        # 4. Auto-Purge old data (> 30 days) to stay within Supabase free tier
+        # 4. Auto-Purge old data (> 30 days)
         try:
-            import urllib
             purge_time = system.date.addDays(system.date.now(), -30)
-            # Use literal 'Z' to avoid '+' in URL params getting parsed as spaces
             iso_purge_time = system.date.format(purge_time, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
-            
-            # The Supabase REST API lets us DELETE based on criteria in the query string
             delete_endpoint = SUPABASE_URL + "/rest/v1/incidents?timestamp=lte." + urllib.quote(iso_purge_time)
-            
-            del_res = system.net.httpDelete(
-                delete_endpoint,
-                headerValues=supabase_headers,
-                throwOnError=False
-            )
-            # Empty response ("") usually indicates successful deletion in Supabase
-            if "message" in str(del_res) and "code" in str(del_res):
-                print("WARNING: Purge may have failed! " + str(del_res))
-            else:
-                print("Successfully purged data older than 30 days.")
-        except Exception, delErr:
-            print("Error purging old data: " + str(delErr))
+            system.net.httpDelete(delete_endpoint, headerValues=supabase_headers, throwOnError=False)
+        except Exception: pass
 
-except Exception, e:
-    print("Error running scraper: " + str(e))
+except Exception: pass
+
