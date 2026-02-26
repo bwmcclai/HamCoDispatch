@@ -83,6 +83,7 @@ function getCityForAgency(agency) {
     if (ag.includes('cicero')) return 'Cicero';
     if (ag.includes('sheridan')) return 'Sheridan';
     if (ag.includes('arcadia')) return 'Arcadia';
+    if (ag.includes('atlanta')) return 'Atlanta';
     return 'County';
 }
 

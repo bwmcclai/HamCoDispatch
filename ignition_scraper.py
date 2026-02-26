@@ -4,17 +4,14 @@ import json
 import base64
 import urllib
 import re
+import random
 
 # === Configuration ===
 SUPABASE_URL = "https://atcwvurzrdfhceqmqgnv.supabase.co"
 SUPABASE_KEY = "sb_publishable_Wi1WkXEmcyJl99lAypqUYw_D5uvE9Ve"
 HAMCO_API_URL = "https://secure2.hamiltoncounty.in.gov/DailyIncidents/Daily_Log/Incidents_Read"
-ARCGIS_BASE = "https://gis1.hamiltoncounty.in.gov/arcgis/rest/services/HamCo911/FeatureServer"
 
-# Local cache for this single execution to prevent double-probing the same address
-GEO_CACHE = {}
-
-# === 10-Code Reference ===
+# Constants
 TEN_CODES = {
     '10-0': 'Fatality', '10-1': 'Signal Weak', '10-3': 'Stop Transmitting', '10-4': 'Acknowledged',
     '10-7': 'Out of Service', '10-8': 'In Service', '10-10': 'Fight in Progress', '10-11': 'Animal Problem',
@@ -45,62 +42,6 @@ def normalize_address(address):
     clean = re.sub(r'\bUS\s*(\d+)\b', r'US HIGHWAY \1', clean)
     return clean.strip()
 
-def get_arcgis_coords(address):
-    if not address or address in ["<UNKNOWN>", ""]: return None
-    
-    # Check local cache first
-    norm = normalize_address(address)
-    if norm in GEO_CACHE: return GEO_CACHE[norm]
-    
-    try:
-        is_intersection = " / " in address or " & " in address
-        layer = 1 if is_intersection else 0
-        field = "LOC" if is_intersection else "Add_Full"
-        
-        # Build Query
-        where_clause = "%s LIKE '%%%s%%'" % (field, norm)
-        params = urllib.urlencode({
-            "where": where_clause, "outFields": "*", "returnGeometry": "true", "outSR": "4326", "f": "json"
-        })
-        
-        url = "%s/%d/query?%s" % (ARCGIS_BASE, layer, params)
-        # Add a tight timeout (2s) to prevent script hanging
-        res_raw = system.net.httpGet(url, 2000, 2000)
-        data = system.util.jsonDecode(res_raw)
-        
-        if data.get("features"):
-            geom = data["features"][0].get("geometry", {})
-            coords = {"lat": geom.get("y"), "lng": geom.get("x")}
-            GEO_CACHE[norm] = coords
-            return coords
-            
-        # Fallback for addresses: split number and street
-        if not is_intersection:
-            num_match = re.search(r'^(\d+)', address)
-            street_match = re.search(r'^\d+\s+BLK\s+(.+)$', address) or re.search(r'^\d+\s+(.+)$', address)
-            
-            if num_match and street_match:
-                num = num_match.group(1)
-                street = street_match.group(1).split(" ")[0]
-                
-                where_clause = "Add_Number = %s AND St_Name LIKE '%s%%'" % (num, street)
-                params = urllib.urlencode({
-                    "where": where_clause, "outFields": "*", "returnGeometry": "true", "outSR": "4326", "f": "json"
-                })
-                url = "%s/0/query?%s" % (ARCGIS_BASE, params)
-                res_raw = system.net.httpGet(url, 2000, 2000)
-                data = system.util.jsonDecode(res_raw)
-                
-                if data.get("features"):
-                    geom = data["features"][0].get("geometry", {})
-                    coords = {"lat": geom.get("y"), "lng": geom.get("x")}
-                    GEO_CACHE[norm] = coords
-                    return coords
-                    
-        return None
-    except:
-        return None
-
 def get_city_for_agency(agency):
     if not agency: return 'County'
     ag = agency.lower()
@@ -111,18 +52,26 @@ def get_city_for_agency(agency):
     if 'cicero' in ag: return 'Cicero'
     if 'sheridan' in ag: return 'Sheridan'
     if 'arcadia' in ag: return 'Arcadia'
+    if 'atlanta' in ag: return 'Atlanta'
     return 'County'
 
 def classify_call_type(call_type, agency):
     ct = call_type.upper()
     if ct.startswith('F ') or ct.startswith('F-'): return 'fire'
-    if any(x in ct for x in ['FIRE', 'STRUCTURE', 'BRUSH', 'SMOKE', 'GAS LEAK', 'CO ALARM', 'HAZMAT', '10-70']): return 'fire'
+    if any(x in ct for x in ['FIRE', 'STRUCTURE', 'BRUSH', 'SMOKE', 'GAS LEAK', 'CO ALARM', 'CARBON MONOXIDE', 'HAZMAT', '10-70', '10-71', '10-73']): return 'fire'
     if ct.startswith('M ') or ct.startswith('M-'): return 'ems'
-    if any(x in ct for x in ['MEDICAL', 'STROKE', 'CARDIAC', 'OVERDOSE', 'BREATHING', 'TRAUMA', '10-52', '10-0']): return 'ems'
+    if any(x in ct for x in [
+        'MEDICAL', 'STROKE', 'CARDIAC', 'CHEST PAIN', 'SEIZURE', 'OVERDOSE', 
+        'BREATHING', 'FALL', 'TRAUMA', 'PEDIATRIC', 'ALLERGIC', 'UNRESPONSIVE',
+        'ABDOMINAL', 'DIABETIC', 'HEMORRHAGE', 'UNCONSCIOUS', 'PREGNANCY',
+        'SICK', 'CVA', 'CHOKING', 'DEATH', 'DOA', 'INJURY', 'PAIN', 'DIFF BREATH',
+        '10-52', '10-0', '10-79'
+    ]): return 'ems'
     if agency:
         ag = agency.upper()
         if 'FIRE' in ag or 'EMS' in ag:
-            return 'fire' if 'ALARM' in ct else 'ems'
+            if 'ALARM' in ct: return 'fire'
+            return 'ems'
     return 'police'
 
 def translate_call_type(call_type):
@@ -150,8 +99,6 @@ try:
     raw_incidents = data.get("Data", [])
     
     transformed = []
-    geo_count = 0
-    max_geo = 20 # Only geocode top 20 fresh incidents per run to keep it snappy
     
     # 2. Transform the data
     for raw in raw_incidents:
@@ -163,13 +110,8 @@ try:
             agency = raw.get("Agency", "")
             address = raw.get("Address", "Address Pending")
             
-            # Geocoding with local cache check
+            # Simplified: No background geocoding. UI handles placement.
             lat, lng = None, None
-            if geo_count < max_geo:
-                coords = get_arcgis_coords(address)
-                if coords:
-                    lat, lng = coords["lat"], coords["lng"]
-                    geo_count += 1
             
             incident_id = str(raw.get("Incident_Number") or ("HC-" + str(raw.get("ID", ""))))
             incident = {
@@ -189,6 +131,10 @@ try:
         except Exception: pass
 
     if transformed:
+        # Sort by timestamp decending and take the newest ones for processing
+        # This ensuring we handle the most recent calls first if there's a lot of data
+        transformed.sort(key=lambda x: x['timestamp'], reverse=True)
+        
         unique_incidents = {}
         for inc in transformed:
             unique_incidents[inc["id"]] = inc
