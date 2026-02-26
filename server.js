@@ -470,9 +470,13 @@ app.get('/{*splat}', (req, res) => {
 });
 
 // ── Start ──
-app.listen(PORT, async () => {
-    console.log(`\n🚨 Hamilton County Dispatch running on http://localhost:${PORT}`);
-    console.log(`   Fetching incident data...\n`);
-    await fetchIncidents();
-    setInterval(fetchIncidents, CACHE_DURATION_MS);
-});
+if (require.main === module) {
+    app.listen(PORT, async () => {
+        console.log(`\n🚨 Hamilton County Dispatch running on http://localhost:${PORT}`);
+        console.log(`   Fetching incident data...\n`);
+        await fetchIncidents();
+        setInterval(fetchIncidents, CACHE_DURATION_MS);
+    });
+}
+
+module.exports = app;

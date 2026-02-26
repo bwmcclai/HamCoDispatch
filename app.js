@@ -12,9 +12,9 @@ const POLL_INTERVAL_MS = 60 * 1000;
 const SCOPE_KEY = 'hamcoSiren_scope';
 
 const INCIDENT_TYPES = {
-    fire: { label: 'Fire', icon: '🔥', color: '#ff6b35' },
-    police: { label: 'Police', icon: '🚔', color: '#4ea8ff' },
-    ems: { label: 'EMS', icon: '🚑', color: '#4ade80' }
+    fire: { label: 'Fire', icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-flame"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z" /></svg>', color: '#ff6b35' },
+    police: { label: 'Police', icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-shield-half"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" /><path d="M12 3v18" /></svg>', color: '#4ea8ff' },
+    ems: { label: 'EMS', icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-ambulance"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M5 17h-2v-11a1 1 0 0 1 1 -1h9v12m-4 0h6m4 0h2v-6h-8m0 -5h5l3 5" /><path d="M6 10h4m-2 -2v4" /></svg>', color: '#4ade80' }
 };
 
 // ── State ──
@@ -26,7 +26,6 @@ let currentFilter = 'all';
 let miniMap = null;
 let isLoading = false;
 let lastUpdated = null;
-let showAllCounty = true;
 let showStations = false;
 let knownIncidentIds = new Set();
 let isFirstLoad = true;
@@ -201,7 +200,10 @@ async function fetchIncidents() {
 
     try {
         const params = new URLSearchParams();
-        if (!showAllCounty) params.set('agency', 'noblesville');
+        const cityFilter = document.getElementById('cityFilter').value;
+        if (cityFilter !== 'all') {
+            params.set('city', cityFilter);
+        }
         params.set('limit', '200');
         const response = await fetch(`${API_BASE}/api/incidents?${params.toString()}`);
 
@@ -227,7 +229,7 @@ async function fetchIncidents() {
 
         removeAllMarkers();
         incidents.forEach(inc => createMarker(inc));
-        renderFeed();
+        renderMarquee();
         updateStats();
         updateMarkersVisibility();
         updateStatusBadge('live');
@@ -281,14 +283,9 @@ function updateStatusBadge(state) {
 }
 
 function showOfflineNotice() {
-    document.getElementById('incidentFeed').innerHTML = `
-        <div class="empty-state">
-            <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-            <h3>Unable to Connect</h3>
-            <p>Could not reach Hamilton County data feed.<br>Retrying automatically...</p>
+    document.getElementById('incidentMarquee').innerHTML = `
+        <div style="color:var(--text-secondary); padding: 10px; font-size: 0.8rem; font-weight: 500;">
+            Unable to Connect — Retrying...
         </div>
     `;
 }
@@ -326,33 +323,52 @@ function renderIncidentCard(incident, index) {
         </div>
     `;
 
-    card.addEventListener('click', () => openModal(incident));
+    card.addEventListener('click', () => {
+        if (incident.lat && incident.lng) {
+            map.flyTo([incident.lat, incident.lng], 16, { duration: 1.2 });
+            const marker = markers.find(m => m.incidentId === incident.id);
+            if (marker) {
+                setTimeout(() => marker.openPopup(), 1200);
+            }
+            setTimeout(() => openModal(incident), 1800);
+        } else {
+            openModal(incident);
+        }
+    });
+
     card.style.animationDelay = `${index * 25}ms`;
     return card;
 }
 
-function renderFeed() {
-    const feed = document.getElementById('incidentFeed');
-    feed.innerHTML = '';
+function renderMarquee() {
+    const track = document.getElementById('incidentMarquee');
+    track.innerHTML = '';
     const filtered = currentFilter === 'all' ? incidents : incidents.filter(i => i.type === currentFilter);
 
     if (filtered.length === 0) {
-        feed.innerHTML = `
-            <div class="empty-state">
-                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-                </svg>
-                <h3>No Incidents Found</h3>
-                <p>${currentFilter !== 'all' ? `No ${currentFilter} incidents currently.` : 'Monitoring Hamilton County...'}</p>
+        track.innerHTML = `
+            <div style="color:var(--text-secondary); padding: 10px; font-size: 0.8rem; font-weight: 500;">
+                ${currentFilter !== 'all' ? `No ${currentFilter} incidents.` : 'Monitoring Hamilton County...'}
             </div>
         `;
         return;
     }
 
-    filtered.forEach((incident, index) => feed.appendChild(renderIncidentCard(incident, index)));
+    const createCards = () => {
+        filtered.forEach((incident, index) => {
+            track.appendChild(renderIncidentCard(incident, index));
+        });
+    };
+
+    const copies = Math.max(2, Math.ceil(15 / Math.max(1, filtered.length)));
+    for (let i = 0; i < copies; i++) createCards();
+
+    const duration = Math.max(20, filtered.length * copies * 4) + 's';
+    track.style.animationDuration = duration;
 }
 
 function updateStats() {
+    animateCounter('allCount', incidents.length);
     animateCounter('fireCount', incidents.filter(i => i.type === 'fire').length);
     animateCounter('policeCount', incidents.filter(i => i.type === 'police').length);
     animateCounter('emsCount', incidents.filter(i => i.type === 'ems').length);
@@ -421,36 +437,28 @@ function initFilters() {
             document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             currentFilter = tab.dataset.filter;
-            renderFeed();
+            renderMarquee();
             updateMarkersVisibility();
         });
     });
 }
 
-// ── Scope Toggle ──
-function initScopeToggle() {
-    const toggle = document.getElementById('scopeToggle');
-    if (!toggle) return;
+// ── City Filter ──
+function initCityFilter() {
+    const cityFilter = document.getElementById('cityFilter');
+    if (!cityFilter) return;
 
-    const saved = localStorage.getItem(SCOPE_KEY);
-    if (saved !== null) showAllCounty = saved === 'true';
+    const saved = localStorage.getItem('hamcoSiren_city');
+    if (saved) {
+        cityFilter.value = saved;
+    }
 
-    toggle.checked = showAllCounty;
-    updateScopeLabel();
-
-    toggle.addEventListener('change', () => {
-        showAllCounty = toggle.checked;
-        localStorage.setItem(SCOPE_KEY, showAllCounty);
-        updateScopeLabel();
+    cityFilter.addEventListener('change', () => {
+        localStorage.setItem('hamcoSiren_city', cityFilter.value);
         knownIncidentIds.clear();
         isFirstLoad = true;
         fetchIncidents();
     });
-}
-
-function updateScopeLabel() {
-    const label = document.getElementById('scopeLabel');
-    if (label) label.textContent = showAllCounty ? 'All Hamilton County' : 'Noblesville Only';
 }
 
 // ── Audio Panel ──
@@ -474,16 +482,12 @@ function updateClock() {
 async function init() {
     initMap();
     initFilters();
-    initScopeToggle();
+    initCityFilter();
     initAudioPanel();
     updateClock();
 
-    document.getElementById('incidentFeed').innerHTML = `
-        <div class="empty-state">
-            <div class="loading-spinner"></div>
-            <h3>Loading Incidents</h3>
-            <p>Connecting to Hamilton County feed...</p>
-        </div>
+    document.getElementById('incidentMarquee').innerHTML = `
+        <div style="color:var(--text-secondary); padding: 10px; font-size: 0.8rem; font-weight: 500;">Loading Incidents...</div>
     `;
 
     await fetchIncidents();

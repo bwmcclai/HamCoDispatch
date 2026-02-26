@@ -71,13 +71,18 @@
             </div>
         </div>
         <div class="top-bar-right">
-            <div class="scope-toggle-container">
-                <span class="scope-label" id="scopeLabel">All Hamilton County</span>
-                <label class="toggle-switch" title="Toggle between Noblesville only and all Hamilton County">
-                    <input type="checkbox" id="scopeToggle" checked>
-                    <span class="toggle-slider"></span>
-                </label>
-            </div>
+            <select id="cityFilter" class="city-select" title="Filter by City">
+                <option value="all">All Hamilton County</option>
+                <option value="Noblesville">Noblesville</option>
+                <option value="Carmel">Carmel</option>
+                <option value="Fishers">Fishers</option>
+                <option value="Westfield">Westfield</option>
+                <option value="Cicero">Cicero</option>
+                <option value="Sheridan">Sheridan</option>
+                <option value="Arcadia">Arcadia</option>
+                <option value="Atlanta">Atlanta</option>
+                <option value="County">County / Unincorp.</option>
+            </select>
             <div class="divider-v"></div>
             <div class="clock" id="clock"></div>
         </div>
@@ -138,32 +143,10 @@
                 </div>
                 <div class="audio-panel-body" id="audioPanelBody">
                     <div class="audio-feed-list">
-                        <a href="https://www.broadcastify.com/listen/feed/21798" target="_blank" rel="noopener"
+                        <a href="https://www.broadcastify.com/listen/feed/3332" target="_blank" rel="noopener"
                             class="audio-feed-item">
                             <span class="audio-feed-dot fire"></span>
                             <span class="audio-feed-name">Hamilton County Fire & EMS</span>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                                <polyline points="15 3 21 3 21 9"></polyline>
-                                <line x1="10" y1="14" x2="21" y2="3"></line>
-                            </svg>
-                        </a>
-                        <a href="https://www.broadcastify.com/listen/ctid/1367" target="_blank" rel="noopener"
-                            class="audio-feed-item">
-                            <span class="audio-feed-dot police"></span>
-                            <span class="audio-feed-name">Hamilton County Police</span>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                                <polyline points="15 3 21 3 21 9"></polyline>
-                                <line x1="10" y1="14" x2="21" y2="3"></line>
-                            </svg>
-                        </a>
-                        <a href="https://www.openmhz.com/system/hamcofire" target="_blank" rel="noopener"
-                            class="audio-feed-item">
-                            <span class="audio-feed-dot ems"></span>
-                            <span class="audio-feed-name">OpenMHz Archive</span>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -191,67 +174,80 @@
                     <span>EMS</span>
                 </div>
             </div>
-        </div>
-
-        <!-- Side Panel -->
-        <aside class="side-panel" id="sidePanel">
-            <!-- Stats Row -->
-            <div class="stats-row">
-                <div class="stat-card stat-fire">
-                    <div class="stat-icon">🔥</div>
+            <!-- Floating Filters -->
+            <div class="map-filters" id="mapFilters">
+                <button class="stat-card filter-tab active" data-filter="all" id="filterAll">
+                    <div class="stat-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="icon icon-tabler icons-tabler-outline icon-tabler-activity">
+                            <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                            <path d="M3 12h4l3 -9l5 18l3 -9h6" />
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="allCount">0</span>
+                        <span class="stat-label">All</span>
+                    </div>
+                </button>
+                <div class="filter-divider"></div>
+                <button class="stat-card filter-tab stat-fire" data-filter="fire" id="filterFire">
+                    <div class="stat-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="icon icon-tabler icons-tabler-outline icon-tabler-flame">
+                            <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                            <path
+                                d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z" />
+                        </svg>
+                    </div>
                     <div class="stat-info">
                         <span class="stat-value" id="fireCount">0</span>
                         <span class="stat-label">Fire</span>
                     </div>
-                </div>
-                <div class="stat-card stat-police">
-                    <div class="stat-icon">🚔</div>
+                </button>
+                <button class="stat-card filter-tab stat-police" data-filter="police" id="filterPolice">
+                    <div class="stat-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="icon icon-tabler icons-tabler-outline icon-tabler-shield-half">
+                            <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                            <path
+                                d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" />
+                            <path d="M12 3v18" />
+                        </svg>
+                    </div>
                     <div class="stat-info">
                         <span class="stat-value" id="policeCount">0</span>
                         <span class="stat-label">Police</span>
                     </div>
-                </div>
-                <div class="stat-card stat-ems">
-                    <div class="stat-icon">🚑</div>
+                </button>
+                <button class="stat-card filter-tab stat-ems" data-filter="ems" id="filterEms">
+                    <div class="stat-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="icon icon-tabler icons-tabler-outline icon-tabler-ambulance">
+                            <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                            <path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+                            <path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+                            <path d="M5 17h-2v-11a1 1 0 0 1 1 -1h9v12m-4 0h6m4 0h2v-6h-8m0 -5h5l3 5" />
+                            <path d="M6 10h4m-2 -2v4" />
+                        </svg>
+                    </div>
                     <div class="stat-info">
                         <span class="stat-value" id="emsCount">0</span>
                         <span class="stat-label">EMS</span>
                     </div>
+                </button>
+            </div>
+
+            <!-- Bottom Marquee -->
+            <div class="marquee-wrapper">
+                <div class="marquee-track" id="incidentMarquee">
+                    <!-- Incidents dynamically populated -->
                 </div>
             </div>
-
-            <!-- Filter Tabs -->
-            <div class="filter-tabs">
-                <button class="filter-tab active" data-filter="all" id="filterAll">
-                    <span class="filter-dot filter-all-dot"></span>
-                    All
-                </button>
-                <button class="filter-tab" data-filter="fire" id="filterFire">
-                    <span class="filter-dot filter-fire-dot"></span>
-                    Fire
-                </button>
-                <button class="filter-tab" data-filter="police" id="filterPolice">
-                    <span class="filter-dot filter-police-dot"></span>
-                    Police
-                </button>
-                <button class="filter-tab" data-filter="ems" id="filterEms">
-                    <span class="filter-dot filter-ems-dot"></span>
-                    EMS
-                </button>
-            </div>
-
-            <!-- Incident Feed -->
-            <div class="incident-feed" id="incidentFeed">
-                <!-- Incidents will be dynamically populated -->
-            </div>
-
-            <!-- Feed Footer -->
-            <div class="feed-footer">
-                <p>Data sourced from Hamilton County, IN</p>
-                <a href="https://secure2.hamiltoncounty.in.gov/DailyIncidents/" target="_blank"
-                    rel="noopener noreferrer">View Official Feed →</a>
-            </div>
-        </aside>
+        </div>
     </main>
 
     <!-- Incident Detail Modal -->

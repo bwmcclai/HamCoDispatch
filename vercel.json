@@ -1,38 +1,8 @@
 {
-    "builds": [
-        {
-            "src": "api/incidents.js",
-            "use": "@vercel/node"
-        },
-        {
-            "src": "index.html",
-            "use": "@vercel/static"
-        },
-        {
-            "src": "styles.css",
-            "use": "@vercel/static"
-        },
-        {
-            "src": "app.js",
-            "use": "@vercel/static"
-        }
-    ],
     "rewrites": [
         {
-            "source": "/api/incidents",
-            "destination": "/api/incidents"
-        },
-        {
-            "source": "/api/stations",
-            "destination": "/api/incidents"
-        },
-        {
-            "source": "/api/codes",
-            "destination": "/api/incidents"
-        },
-        {
-            "source": "/api/health",
-            "destination": "/api/incidents"
+            "source": "/api/(.*)",
+            "destination": "/api/index.js"
         }
     ]
 }
