@@ -52,12 +52,7 @@ function formatTime(date) {
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
-function formatClockTime() {
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-    return `${dateStr} · ${timeStr}`;
-}
+
 
 function formatAddress(address) {
     if (!address || address === '<UNKNOWN>' || address === 'Address Pending') return 'Address Pending';
@@ -318,6 +313,11 @@ function renderMapLayers() {
                 const incMin = inc.timestamp.getHours() * 60 + inc.timestamp.getMinutes();
                 return incMin <= currentHistoryTime && (currentHistoryTime - incMin) <= HISTORY_DURATIONS[inc.type];
             });
+        } else {
+            heatIncidents = heatIncidents.filter(inc => {
+                const ageMs = Date.now() - inc.timestamp.getTime();
+                return ageMs <= 3600000;
+            });
         }
 
         const heatData = heatIncidents.map(inc => [inc.lat, inc.lng, 1]);
@@ -351,9 +351,9 @@ async function fetchIncidents() {
             params.set('limit', '5000'); // fetch more for historical mode
         } else {
             const start = new Date();
-            start.setHours(start.getHours() - 2); // Reduced from 6h to 2h for faster initial load
+            start.setHours(start.getHours() - 12); // Reverted back to 12h to ensure data loads when slow
             params.set('start', start.toISOString());
-            params.set('limit', '200'); // Reduced from 500 to 200
+            params.set('limit', '500'); // Increased from 200 to 500
         }
 
         const response = await fetch(`${API_BASE}/api/incidents?${params.toString()}`);
@@ -405,8 +405,53 @@ async function fetchIncidents() {
         isLoading = false;
     }
 }
+// ── Audio Context for Chimes ──
+let audioCtx;
+function playChime() {
+    try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+        osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.1); // A5
+
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.8);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.8);
+    } catch (e) { console.warn("Audio chime failed"); }
+}
 
 function flashNewIncidents(newIds) {
+    let playSound = false;
+    const criticalTypes = ['Structure Fire', 'Fire Alarm', 'Person with Gun', 'Traffic Accident', 'Injury Accident', 'Cardiac', 'Overdose', 'Unconscious', 'Fatality', 'Emergency', 'Water Rescue'];
+
+    newIds.forEach(id => {
+        const inc = incidents.find(i => id === i.id);
+        if (inc) {
+            // Check if critical
+            if (criticalTypes.some(t => inc.description.toLowerCase().includes(t.toLowerCase()))) {
+                playSound = true;
+                if (Notification.permission === 'granted') {
+                    new Notification('HamCoDispatch Alert', {
+                        body: `${inc.description} - ${formatAddress(inc.address)}`,
+                        icon: '/favicon.ico'
+                    });
+                }
+            }
+        }
+    });
+
+    if (playSound) playChime();
+
     const newest = incidents.find(i => newIds.includes(i.id));
     if (newest && newest.lat && newest.lng) {
         const marker = markers.find(m => m.incidentId === newest.id);
@@ -591,6 +636,25 @@ function openModal(incident) {
     document.getElementById('modalStatus').textContent = incident.incidentNumber || '—';
     document.getElementById('modalReported').textContent = incident.timestamp.toLocaleString();
 
+    // Setup Share Button
+    const shareBtn = document.getElementById('modalShareBtn');
+    if (shareBtn) {
+        shareBtn.onclick = () => {
+            const url = window.location.origin + window.location.pathname + '?id=' + incident.id;
+            navigator.clipboard.writeText(url).then(() => {
+                shareBtn.innerHTML = '<span style="font-size:0.65rem; color:var(--text-accent); font-weight:700;">Copied!</span>';
+                setTimeout(() => {
+                    shareBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`;
+                }, 2000);
+            });
+        };
+    }
+
+    // Start Duration Interval
+    if (modalDurationInterval) clearInterval(modalDurationInterval);
+    updateModalDuration(incident.timestamp);
+    modalDurationInterval = setInterval(() => updateModalDuration(incident.timestamp), 1000);
+
     const previewEl = document.getElementById('modalMapPreview');
     previewEl.innerHTML = '';
     overlay.classList.add('active');
@@ -617,6 +681,7 @@ function openModal(incident) {
 
 function closeModal() {
     document.getElementById('modalOverlay').classList.remove('active');
+    if (modalDurationInterval) clearInterval(modalDurationInterval);
     if (miniMap) { setTimeout(() => { miniMap.remove(); miniMap = null; }, 300); }
 }
 
@@ -832,36 +897,136 @@ function initSidebarToggle() {
     }
 }
 
-// ── Audio Panel ──
-function initAudioPanel() {
-    const toggle = document.getElementById('audioPanelToggle');
-    const drawer = document.getElementById('openmhzDrawer');
-    const closeBtn = document.getElementById('closeDrawerBtn');
+// ── Audio & Data Panels ──
+function initPanels() {
+    const audioToggle = document.getElementById('audioPanelToggle');
+    const audioDrawer = document.getElementById('openmhzDrawer');
+    const closeAudioBtn = document.getElementById('closeDrawerBtn');
 
-    if (!toggle || !drawer) return;
-
-    toggle.addEventListener('click', () => {
-        drawer.classList.toggle('open');
-        toggle.classList.toggle('active');
-        if (drawer.classList.contains('open')) {
-            toggle.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>Close Scanner`;
-        } else {
-            toggle.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;vertical-align:middle;"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>Open Scanner`;
-        }
-    });
-
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            drawer.classList.remove('open');
-            toggle.classList.remove('active');
-            toggle.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;vertical-align:middle;"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>Open Scanner`;
+    if (audioToggle && audioDrawer) {
+        audioToggle.addEventListener('click', () => {
+            audioDrawer.classList.toggle('open');
+            audioToggle.classList.toggle('active');
         });
+        if (closeAudioBtn) {
+            closeAudioBtn.addEventListener('click', () => {
+                audioDrawer.classList.remove('open');
+                audioToggle.classList.remove('active');
+            });
+        }
+    }
+
+    const dataToggle = document.getElementById('dataInsightsBtn');
+    const dataDrawer = document.getElementById('dataInsightsDrawer');
+    const closeDataBtn = document.getElementById('closeDataInsightsBtn');
+
+    if (dataToggle && dataDrawer) {
+        dataToggle.addEventListener('click', () => {
+            const isOpen = dataDrawer.classList.contains('open');
+            if (!isOpen) {
+                renderDataInsights(); // re-render charts when opening
+            }
+            dataDrawer.classList.toggle('open');
+            dataToggle.classList.toggle('active');
+        });
+        if (closeDataBtn) {
+            closeDataBtn.addEventListener('click', () => {
+                dataDrawer.classList.remove('open');
+                dataToggle.classList.remove('active');
+            });
+        }
     }
 }
 
-// ── Clock ──
-function updateClock() {
-    document.getElementById('clock').textContent = formatClockTime();
+// ── Chart JS Insights ──
+let typeChartInstance = null;
+let agenciesChartInstance = null;
+
+function renderDataInsights() {
+    // Pie chart for Types
+    const typeEl = document.getElementById('typePieChart');
+    if (!typeEl) return;
+    const ctx1 = typeEl.getContext('2d');
+
+    const fireCount = incidents.filter(i => i.type === 'fire').length;
+    const policeCount = incidents.filter(i => i.type === 'police').length;
+    const emsCount = incidents.filter(i => i.type === 'ems').length;
+    const trafficCount = incidents.filter(i => i.type === 'traffic').length;
+
+    // Chart default settings for dark theme
+    Chart.defaults.color = '#A0A0B0';
+    Chart.defaults.font.family = 'Inter, sans-serif';
+
+    if (typeChartInstance) typeChartInstance.destroy();
+    typeChartInstance = new Chart(ctx1, {
+        type: 'doughnut',
+        data: {
+            labels: ['Fire', 'Police', 'EMS', 'Traffic'],
+            datasets: [{
+                data: [fireCount, policeCount, emsCount, trafficCount],
+                backgroundColor: ['#ef4444', '#3b82f6', '#facc15', '#a855f7'],
+                borderWidth: 0,
+                hoverOffset: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'right' },
+                title: {
+                    display: true,
+                    text: 'Incident Types (Current View)',
+                    color: '#ffffff',
+                    font: { size: 14, weight: 600 }
+                }
+            }
+        }
+    });
+
+    // Bar chart for Agencies
+    const agencyEl = document.getElementById('busiestAgenciesChart');
+    if (!agencyEl) return;
+    const ctx2 = agencyEl.getContext('2d');
+
+    const agencyCounts = {};
+    incidents.forEach(inc => {
+        const ag = inc.agency || 'Unknown';
+        agencyCounts[ag] = (agencyCounts[ag] || 0) + 1;
+    });
+
+    const sortedAgencies = Object.entries(agencyCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+    if (agenciesChartInstance) agenciesChartInstance.destroy();
+    agenciesChartInstance = new Chart(ctx2, {
+        type: 'bar',
+        data: {
+            labels: sortedAgencies.map(a => a[0].replace(/ Police| Fire| EMS/gi, '')),
+            datasets: [{
+                label: 'Calls',
+                data: sortedAgencies.map(a => a[1]),
+                backgroundColor: '#ff6b35',
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                title: {
+                    display: true,
+                    text: 'Top 5 Busiest Agencies',
+                    color: '#ffffff',
+                    font: { size: 14, weight: 600 }
+                }
+            },
+            scales: {
+                y: { ticks: { precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                x: { grid: { display: false } }
+            }
+        }
+    });
 }
 
 // ── Init ──
@@ -870,9 +1035,8 @@ async function init() {
     initMap();
     initFilters();
     initTimeFilter();
-    initAudioPanel();
+    initPanels();
     initSidebarToggle();
-    updateClock();
 
     // Check if stations should be shown from persisted settings
     if (showStations) {
@@ -886,7 +1050,6 @@ async function init() {
     `;
 
     await fetchIncidents();
-    setInterval(updateClock, 1000);
     setInterval(fetchIncidents, POLL_INTERVAL_MS);
 
     document.getElementById('modalClose').addEventListener('click', closeModal);
@@ -894,6 +1057,27 @@ async function init() {
         if (e.target === e.currentTarget) closeModal();
     });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+    // Check for Deep Link parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const deepLinkId = urlParams.get('id');
+    if (deepLinkId) {
+        const targetInc = incidents.find(i => i.id === deepLinkId);
+        if (targetInc) {
+            if (targetInc.lat && targetInc.lng) {
+                map.flyTo([targetInc.lat, targetInc.lng], 16, { duration: 1.5 });
+            }
+            openModal(targetInc);
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }
+
+    // Softly ask for Notifications on the first interaction
+    document.body.addEventListener('click', () => {
+        if (Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }, { once: true });
 
     console.log('%c🚨 Hamilton County Dispatch — Live', 'color: #ff6b35; font-size: 14px; font-weight: bold;');
     console.log('%cHamCoDispatch.com — Hamilton County, IN', 'color: #888; font-size: 11px;');
