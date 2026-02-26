@@ -95,7 +95,17 @@ app.get('/api/incidents', async (req, res) => {
 
             const { data, error } = await query;
             if (error) throw error;
-            result = data || [];
+
+            result = (data || []).map(inc => {
+                if (inc.lat === null || inc.lng === null) {
+                    const coords = parseAddress(inc.address, inc.agency);
+                    if (coords) {
+                        inc.lat = coords.lat;
+                        inc.lng = coords.lng;
+                    }
+                }
+                return inc;
+            });
         } catch (e) {
             console.error("Supabase query error, falling back:", e.message);
             // Fall back to memory if DB query fails
