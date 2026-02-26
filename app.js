@@ -23,7 +23,6 @@ let map;
 let markers = [];
 let stationMarkers = [];
 let incidents = [];
-let currentFilter = 'all';
 let visibleCats = { traffic: false, ems: true, fire: true, police: true }; // Master visibility toggles
 let miniMap = null;
 let isLoading = false;
@@ -67,6 +66,29 @@ function formatAddress(address) {
         if (abbrevs.includes(w.toUpperCase())) return w.toUpperCase();
         return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
     });
+}
+
+// ── Persistence ──
+function saveSettings() {
+    localStorage.setItem(SCOPE_KEY, JSON.stringify({
+        visibleCats: visibleCats,
+        showStations: showStations
+    }));
+}
+
+function loadSettings() {
+    const saved = localStorage.getItem(SCOPE_KEY);
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            if (parsed.visibleCats) visibleCats = parsed.visibleCats;
+            if (typeof parsed.showStations === 'boolean') {
+                showStations = parsed.showStations;
+            }
+        } catch (e) {
+            console.warn("Failed to load settings", e);
+        }
+    }
 }
 
 // ── Map Setup ──
@@ -136,6 +158,7 @@ function initMap() {
         showStations = !showStations;
         const btn = document.getElementById('stationsToggleBtn');
         btn.classList.toggle('active', showStations);
+        saveSettings();
         if (showStations) loadFireStations();
         else clearFireStations();
     });
@@ -257,23 +280,7 @@ function removeAllMarkers() {
 
 function updateMarkersVisibility() {
     markers.forEach(m => {
-        const inc = incidents.find(i => i.id === m.incidentId);
-        let opacity = (currentFilter === 'all' || m.incidentType === currentFilter) ? 1 : 0.12;
-
-        if (inc) {
-            // Updated filtering logic using primary types
-            if (inc.type === 'traffic' && !visibleCats.traffic && currentFilter === 'all') {
-                opacity = 0;
-            } else if (currentFilter !== 'all' && m.incidentType !== currentFilter) {
-                opacity = 0.12;
-            } else if (inc.type === 'ems' && !visibleCats.ems && currentFilter === 'all') {
-                opacity = 0;
-            } else if (inc.type === 'fire' && !visibleCats.fire && currentFilter === 'all') {
-                opacity = 0;
-            } else if (inc.type === 'police' && !visibleCats.police && currentFilter === 'all') {
-                opacity = 0;
-            }
-        }
+        let opacity = visibleCats[m.incidentType] ? 1 : 0;
 
         if (isHistoryMode) {
             const inc = incidents.find(i => i.id === m.incidentId);
@@ -304,17 +311,7 @@ function renderMapLayers() {
     if (showHeatmap && L.heatLayer) {
         let heatIncidents = incidents
             .filter(inc => inc.lat && inc.lng)
-            .filter(inc => currentFilter === 'all' || inc.type === currentFilter);
-
-        if (currentFilter === 'all') {
-            heatIncidents = heatIncidents.filter(inc => {
-                if (inc.type === 'traffic') return visibleCats.traffic;
-                if (inc.type === 'ems') return visibleCats.ems;
-                if (inc.type === 'fire') return visibleCats.fire;
-                if (inc.type === 'police') return visibleCats.police;
-                return true;
-            });
-        }
+            .filter(inc => visibleCats[inc.type]);
 
         if (isHistoryMode) {
             heatIncidents = heatIncidents.filter(inc => {
@@ -520,20 +517,15 @@ function renderIncidentList() {
     if (!list) return;
     list.innerHTML = '';
 
-    let filtered = currentFilter === 'all' ? incidents : incidents.filter(i => i.type === currentFilter);
+    // Unified multi-select filtering logic
+    filtered = filtered.filter(inc => {
+        if (inc.type === 'traffic') return visibleCats.traffic;
+        if (inc.type === 'ems') return visibleCats.ems;
+        if (inc.type === 'fire') return visibleCats.fire;
+        if (inc.type === 'police') return visibleCats.police;
+        return true;
+    });
 
-    // Filter by master visibility toggles in "All" mode
-    if (currentFilter === 'all') {
-        filtered = filtered.filter(inc => {
-            if (inc.type === 'traffic') return visibleCats.traffic;
-            if (inc.type === 'ems') return visibleCats.ems;
-            if (inc.type === 'fire') return visibleCats.fire;
-            if (inc.type === 'police') return visibleCats.police;
-            return true;
-        });
-    }
-
-    // In history mode, only show incidents that are visible on the map (before/at current time)
     if (isHistoryMode) {
         filtered = filtered.filter(inc => {
             const incMin = inc.timestamp.getHours() * 60 + inc.timestamp.getMinutes();
@@ -547,7 +539,7 @@ function renderIncidentList() {
     if (filtered.length === 0) {
         list.innerHTML = `
             <div class="empty-state" style="padding: 40px 20px; text-align: center; opacity: 0.5;">
-                <p style="font-size: 0.85rem;">${currentFilter !== 'all' ? `No recent ${currentFilter} incidents.` : 'Monitoring Hamilton County...'}</p>
+                <p style="font-size: 0.85rem;">No recent incidents found for selected filters.</p>
             </div>
         `;
         document.getElementById('sidebarCount').textContent = '0 total';
@@ -630,14 +622,41 @@ function closeModal() {
 
 // ── Filters ──
 function initFilters() {
+    updateFilterUI();
     document.querySelectorAll('.filter-tab').forEach(tab => {
         tab.addEventListener('click', () => {
-            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            currentFilter = tab.dataset.filter;
+            const filter = tab.dataset.filter;
+            if (filter === 'all') {
+                const areAllOn = visibleCats.traffic && visibleCats.fire && visibleCats.police && visibleCats.ems;
+                if (areAllOn) {
+                    // If all on, set to default (Traffic OFF)
+                    visibleCats = { traffic: false, fire: true, police: true, ems: true };
+                } else {
+                    // Turn all on
+                    visibleCats = { traffic: true, fire: true, police: true, ems: true };
+                }
+            } else {
+                visibleCats[filter] = !visibleCats[filter];
+            }
+
+            saveSettings();
+            updateFilterUI();
             renderIncidentList();
             renderMapLayers();
+            updateStats();
         });
+    });
+}
+
+function updateFilterUI() {
+    const areAllOn = visibleCats.traffic && visibleCats.fire && visibleCats.police && visibleCats.ems;
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+        const filter = tab.dataset.filter;
+        if (filter === 'all') {
+            tab.classList.toggle('active', areAllOn);
+        } else {
+            tab.classList.toggle('active', visibleCats[filter]);
+        }
     });
 }
 
@@ -832,12 +851,20 @@ function updateClock() {
 
 // ── Init ──
 async function init() {
+    loadSettings();
     initMap();
     initFilters();
     initTimeFilter();
     initAudioPanel();
     initSidebarToggle();
     updateClock();
+
+    // Check if stations should be shown from persisted settings
+    if (showStations) {
+        const btn = document.getElementById('stationsToggleBtn');
+        if (btn) btn.classList.add('active');
+        loadFireStations();
+    }
 
     document.getElementById('incidentList').innerHTML = `
         <div style="color:var(--text-secondary); padding: 40px 20px; text-align: center; font-size: 0.85rem; font-weight: 500;">Connecting to Siren Feed...</div>
