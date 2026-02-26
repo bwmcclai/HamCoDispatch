@@ -518,7 +518,7 @@ function renderIncidentList() {
     list.innerHTML = '';
 
     // Unified multi-select filtering logic
-    filtered = filtered.filter(inc => {
+    let filtered = incidents.filter(inc => {
         if (inc.type === 'traffic') return visibleCats.traffic;
         if (inc.type === 'ems') return visibleCats.ems;
         if (inc.type === 'fire') return visibleCats.fire;
