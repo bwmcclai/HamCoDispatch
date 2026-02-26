@@ -258,6 +258,8 @@ function translateCallType(callType) {
     return result;
 }
 
+const GLOBAL_GEO_CACHE = new Map();
+
 /**
  * Normalizes CAD addresses for better geocoding accuracy.
  */
@@ -282,13 +284,15 @@ function normalizeAddress(address) {
 async function geocodeArcGIS(address, agency) {
     if (!address || address === '<UNKNOWN>' || address === '') return null;
 
+    const queryAddr = normalizeAddress(address);
+    if (GLOBAL_GEO_CACHE.has(queryAddr)) {
+        return GLOBAL_GEO_CACHE.get(queryAddr);
+    }
+
     try {
         const isIntersection = address.includes(' / ') || address.includes(' & ');
         const layer = isIntersection ? 1 : 0; // Layer 1 = Intersections, Layer 0 = Address Points
         const field = isIntersection ? 'LOC' : 'Add_Full';
-
-        // Clean up address for query
-        let queryAddr = normalizeAddress(address);
 
         // Build query URL
         const params = new URLSearchParams({
@@ -303,15 +307,22 @@ async function geocodeArcGIS(address, agency) {
         if (!response.ok) throw new Error('ArcGIS query failed');
 
         const data = await response.json();
+        let result = null;
+
         if (data.features && data.features.length > 0) {
             const feat = data.features[0];
-            return {
+            result = {
                 lat: feat.geometry.y,
                 lng: feat.geometry.x,
                 accuracy: 'high',
                 source: 'ArcGIS'
             };
         }
+
+        if (result) {
+            GLOBAL_GEO_CACHE.set(queryAddr, result);
+        }
+        return result;
 
         // Secondary attempt for addresses: split into number and street
         if (!isIntersection) {

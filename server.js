@@ -52,15 +52,21 @@ async function fetchIncidentsFallback() {
 
         const data = await response.json();
         const rawIncidents = data.Data || [];
+        let geocodeCount = 0;
+        const MAX_GEO_FALLBACK = 20;
+
         const transformed = await Promise.all(rawIncidents.slice(0, 100).map(async raw => {
             const dateTime = parseNetDate(raw.DateTime);
             if (!dateTime || isNaN(dateTime.getTime())) return null;
             const category = classifyCallType(raw.Call_Type, raw.Agency);
 
-            // Try high-accuracy ArcGIS first
-            let coords = await geocodeArcGIS(raw.Address, raw.Agency);
+            let coords = null;
+            if (geocodeCount < MAX_GEO_FALLBACK) {
+                coords = await geocodeArcGIS(raw.Address, raw.Agency);
+                if (coords && coords.accuracy === 'high') geocodeCount++;
+            }
+
             if (!coords) {
-                // Fallback to manual/fuzzy jitter
                 coords = parseAddress(raw.Address, raw.Agency);
             }
 
@@ -105,12 +111,24 @@ app.get('/api/incidents', async (req, res) => {
             const { data, error } = await query;
             if (error) throw error;
 
+            let geocodeCount = 0;
+            const MAX_GEOCODE_PER_REQ = 10;
+
             result = await Promise.all((data || []).map(async (inc) => {
                 if (inc.lat === null || inc.lng === null) {
-                    let coords = await geocodeArcGIS(inc.address, inc.agency);
+                    let coords = null;
+
+                    // Only attempt high-accuracy ArcGIS for a limited number of missing items per request
+                    if (geocodeCount < MAX_GEOCODE_PER_REQ) {
+                        coords = await geocodeArcGIS(inc.address, inc.agency);
+                        if (coords && coords.accuracy === 'high') geocodeCount++;
+                    }
+
+                    // Always fallback to fast parseAddress if ArcGIS was skipped or failed
                     if (!coords) {
                         coords = parseAddress(inc.address, inc.agency);
                     }
+
                     if (coords) {
                         inc.lat = coords.lat;
                         inc.lng = coords.lng;
