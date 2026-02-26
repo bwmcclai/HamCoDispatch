@@ -52,19 +52,17 @@ async function fetchIncidentsFallback() {
 
         const data = await response.json();
         const rawIncidents = data.Data || [];
-        let geocodeCount = 0;
-        const MAX_GEO_FALLBACK = 20;
-
-        const transformed = await Promise.all(rawIncidents.slice(0, 100).map(async raw => {
+        const transformed = await Promise.all(rawIncidents.slice(0, 500).map(async raw => {
             const dateTime = parseNetDate(raw.DateTime);
             if (!dateTime || isNaN(dateTime.getTime())) return null;
             const category = classifyCallType(raw.Call_Type, raw.Agency);
 
+            // Only focus on Fire & EMS
+            if (!['fire', 'ems'].includes(category)) return null;
+
             let coords = null;
-            if (geocodeCount < MAX_GEO_FALLBACK) {
-                coords = await geocodeArcGIS(raw.Address, raw.Agency);
-                if (coords && coords.accuracy === 'high') geocodeCount++;
-            }
+            // Background scraping: try high-accuracy geocoding for all new Fire/EMS incidents
+            coords = await geocodeArcGIS(raw.Address, raw.Agency);
 
             if (!coords) {
                 coords = parseAddress(raw.Address, raw.Agency);
@@ -88,10 +86,29 @@ async function fetchIncidentsFallback() {
                 is_noblesville: ['Noblesville Fire', 'Noblesville Police'].includes(raw.Agency),
             };
         }));
-        cachedIncidents = transformed;
+
+        const finalIncidents = transformed.filter(Boolean);
+        cachedIncidents = finalIncidents;
         lastFetchTime = Date.now();
-        return transformed;
+
+        // ── Upsert to Supabase ──
+        if (supabase && finalIncidents.length > 0) {
+            try {
+                // We do a bulk upsert. Supabase handles conflict on 'id' if the schema has it as primary key.
+                const { error } = await supabase
+                    .from('incidents')
+                    .upsert(finalIncidents, { onConflict: 'id', ignoreDuplicates: false });
+
+                if (error) console.error("Supabase Upsert Error:", error.message);
+                else console.log(`Successfully upserted ${finalIncidents.length} incidents to Supabase.`);
+            } catch (sbErr) {
+                console.error("Supabase Upsert Exception:", sbErr.message);
+            }
+        }
+
+        return finalIncidents;
     } catch (err) {
+        console.error("Fetch Fallback Error:", err.message);
         return cachedIncidents;
     }
 }
@@ -155,7 +172,12 @@ app.get('/api/incidents', async (req, res) => {
     // Common filtering
     if (req.query.agency === 'noblesville') result = result.filter(i => i.is_noblesville);
     if (req.query.city) result = result.filter(i => i.city.toLowerCase() === req.query.city.toLowerCase());
-    if (req.query.type && ['fire', 'police', 'ems'].includes(req.query.type)) result = result.filter(i => i.type === req.query.type);
+    if (req.query.type && ['fire', 'ems'].includes(req.query.type)) result = result.filter(i => i.type === req.query.type);
+
+    // Always filter for only fire/ems unless specifically requested otherwise (safety check)
+    if (!req.query.include_all) {
+        result = result.filter(i => ['fire', 'ems'].includes(i.type));
+    }
 
     // Limit in memory if not supabase
     if (!supabase) {

@@ -23,7 +23,7 @@ let map;
 let markers = [];
 let stationMarkers = [];
 let incidents = [];
-let visibleCats = { traffic: false, ems: true, fire: true, police: true }; // Master visibility toggles
+let visibleCats = { ems: true, fire: true }; // Focus ONLY on Fire & EMS
 let miniMap = null;
 let isLoading = false;
 let lastUpdated = null;
@@ -32,12 +32,13 @@ let knownIncidentIds = new Set();
 let isFirstLoad = true;
 
 // ── New Features State ──
-let isHistoryMode = false;
+let isHistoryMode = true; // Default to historical/timeline mode
 let historyDate = null;
 let heatLayer = null;
 let showHeatmap = false;
 let currentHistoryTime = 1440;
 const HISTORY_DURATIONS = { traffic: 60, fire: 240, police: 120, ems: 60 };
+let historyWindow = 60; // Default to 60 minute window
 
 // ── Utility ──
 function timeAgo(date) {
@@ -281,10 +282,18 @@ function updateMarkersVisibility() {
             const inc = incidents.find(i => i.id === m.incidentId);
             if (inc) {
                 const incMin = inc.timestamp.getHours() * 60 + inc.timestamp.getMinutes();
+                const now = new Date();
+                const isToday = !historyDate || historyDate === `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+
                 if (incMin > currentHistoryTime) {
                     opacity = 0;
-                } else if (currentHistoryTime - incMin > HISTORY_DURATIONS[inc.type]) {
-                    opacity = 0;
+                } else if (isToday && currentHistoryTime >= (now.getHours() * 60 + now.getMinutes() - 10)) {
+                    // Slider is at the "Live" end
+                    // Show last hour of data
+                    opacity = (currentHistoryTime - incMin <= 60) ? 1 : 0.15; // Fade old ones instead of hiding completely?
+                } else {
+                    // Slider is moved back - show everything up to that point
+                    opacity = 1;
                 }
             }
         }
@@ -306,7 +315,7 @@ function renderMapLayers() {
     if (showHeatmap && L.heatLayer) {
         let heatIncidents = incidents
             .filter(inc => inc.lat && inc.lng)
-            .filter(inc => visibleCats[inc.type]);
+            .filter(inc => ['fire', 'ems'].includes(inc.type) && visibleCats[inc.type]);
 
         if (isHistoryMode) {
             heatIncidents = heatIncidents.filter(inc => {
@@ -564,17 +573,25 @@ function renderIncidentList() {
 
     // Unified multi-select filtering logic
     let filtered = incidents.filter(inc => {
-        if (inc.type === 'traffic') return visibleCats.traffic;
         if (inc.type === 'ems') return visibleCats.ems;
         if (inc.type === 'fire') return visibleCats.fire;
-        if (inc.type === 'police') return visibleCats.police;
-        return true;
+        return false;
     });
 
     if (isHistoryMode) {
         filtered = filtered.filter(inc => {
             const incMin = inc.timestamp.getHours() * 60 + inc.timestamp.getMinutes();
-            return incMin <= currentHistoryTime;
+            const now = new Date();
+            const isToday = !historyDate || historyDate === `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+
+            if (incMin > currentHistoryTime) return false;
+
+            // Match map visibility: if at the end of the slider on Today, show only last hour
+            const isLivePoint = isToday && currentHistoryTime >= (now.getHours() * 60 + now.getMinutes() - 10);
+            if (isLivePoint) {
+                return (currentHistoryTime - incMin) <= 60;
+            }
+            return true;
         });
     }
 
@@ -599,11 +616,12 @@ function renderIncidentList() {
 }
 
 function updateStats() {
-    animateCounter('allCount', incidents.length);
-    animateCounter('trafficCount', incidents.filter(i => i.type === 'traffic').length);
-    animateCounter('fireCount', incidents.filter(i => i.type === 'fire').length);
-    animateCounter('policeCount', incidents.filter(i => i.type === 'police').length);
-    animateCounter('emsCount', incidents.filter(i => i.type === 'ems').length);
+    const fireList = incidents.filter(i => i.type === 'fire');
+    const emsList = incidents.filter(i => i.type === 'ems');
+
+    animateCounter('allCount', fireList.length + emsList.length);
+    animateCounter('fireCount', fireList.length);
+    animateCounter('emsCount', emsList.length);
 
     // Also refresh the list if filter changed
     renderIncidentList();
@@ -692,16 +710,16 @@ function initFilters() {
         tab.addEventListener('click', () => {
             const filter = tab.dataset.filter;
             if (filter === 'all') {
-                const areAllOn = visibleCats.traffic && visibleCats.fire && visibleCats.police && visibleCats.ems;
+                const areAllOn = visibleCats.fire && visibleCats.ems;
                 if (areAllOn) {
-                    // If all on, set to default (Traffic OFF)
-                    visibleCats = { traffic: false, fire: true, police: true, ems: true };
+                    visibleCats = { fire: true, ems: true }; // Stay on
                 } else {
-                    // Turn all on
-                    visibleCats = { traffic: true, fire: true, police: true, ems: true };
+                    visibleCats = { fire: true, ems: true };
                 }
             } else {
-                visibleCats[filter] = !visibleCats[filter];
+                if (visibleCats[filter] !== undefined) {
+                    visibleCats[filter] = !visibleCats[filter];
+                }
             }
 
             saveSettings();
@@ -714,12 +732,12 @@ function initFilters() {
 }
 
 function updateFilterUI() {
-    const areAllOn = visibleCats.traffic && visibleCats.fire && visibleCats.police && visibleCats.ems;
+    const areAllOn = visibleCats.fire && visibleCats.ems;
     document.querySelectorAll('.filter-tab').forEach(tab => {
         const filter = tab.dataset.filter;
         if (filter === 'all') {
             tab.classList.toggle('active', areAllOn);
-        } else {
+        } else if (visibleCats[filter] !== undefined) {
             tab.classList.toggle('active', visibleCats[filter]);
         }
     });
@@ -783,54 +801,17 @@ function initTimeFilter() {
     if (!liveBtn || !historyBtn) return;
 
     liveBtn.addEventListener('click', () => {
-        isHistoryMode = false;
-        liveBtn.classList.add('active');
-        historyBtn.classList.remove('active');
-
-        if (audioBarWrapper) audioBarWrapper.style.display = 'flex';
-        if (historyPanel) historyPanel.style.display = 'none';
-
-        if (heatmapBtn) {
-            heatmapBtn.style.display = 'none';
-            showHeatmap = false;
-            heatmapBtn.classList.remove('active');
-        }
-
-        knownIncidentIds.clear();
-        isFirstLoad = true;
+        const now = new Date();
+        const pad = n => n.toString().padStart(2, '0');
+        historyDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+        currentHistoryTime = now.getHours() * 60 + now.getMinutes();
+        updateHistoryUI();
         fetchIncidents();
-        renderIncidentList(); // Immediate refresh
-        renderMapLayers();    // Refresh markers
     });
 
     historyBtn.addEventListener('click', () => {
-        isHistoryMode = true;
-        historyBtn.classList.add('active');
-        liveBtn.classList.remove('active');
-
-        if (audioBarWrapper) audioBarWrapper.style.display = 'none';
-        if (historyPanel) historyPanel.style.display = 'flex';
-
-        if (heatmapBtn) {
-            heatmapBtn.style.display = 'none';
-            showHeatmap = false;
-            heatmapBtn.classList.remove('active');
-        }
-
-        if (!historyDate) {
-            const d = new Date();
-            const pad = n => n.toString().padStart(2, '0');
-            historyDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        }
-
-        currentHistoryTime = 1440; // Default to end of day
-        updateHistoryUI();
-
-        knownIncidentIds.clear();
-        isFirstLoad = true;
-        fetchIncidents();
-        renderIncidentList(); // Immediate refresh
-        renderMapLayers();    // Refresh markers
+        // Toggle heat map if needed, or just focus slider
+        if (historySlider) historySlider.focus();
     });
 
     if (prevDateBtn && nextDateBtn) {
@@ -883,9 +864,13 @@ function initSidebarToggle() {
     if (!sidebar) return;
 
     if (toggle) {
-        toggle.addEventListener('click', () => {
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
             sidebar.classList.toggle('open');
-            sidebar.classList.toggle('collapsed');
+            // Remove collapsed if opening
+            if (sidebar.classList.contains('open')) {
+                sidebar.classList.remove('collapsed');
+            }
         });
     }
 
@@ -1032,11 +1017,21 @@ function renderDataInsights() {
 // ── Init ──
 async function init() {
     loadSettings();
+
+    // Set default date if not set
+    if (!historyDate) {
+        const d = new Date();
+        const pad = n => n.toString().padStart(2, '0');
+        historyDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        currentHistoryTime = d.getHours() * 60 + d.getMinutes();
+    }
+
     initMap();
     initFilters();
     initTimeFilter();
     initPanels();
     initSidebarToggle();
+    updateHistoryUI();
 
     // Check if stations should be shown from persisted settings
     if (showStations) {

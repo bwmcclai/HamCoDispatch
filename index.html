@@ -100,18 +100,6 @@
                         <span class="stat-label">All</span>
                     </div>
                 </button>
-                <button class="stat-card filter-tab stat-traffic" data-filter="traffic" id="filterTraffic">
-                    <div class="stat-icon">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71L12 2z" />
-                        </svg>
-                    </div>
-                    <div class="stat-info">
-                        <span class="stat-value" id="trafficCount">0</span>
-                        <span class="stat-label">Traffic</span>
-                    </div>
-                </button>
                 <button class="stat-card filter-tab stat-fire" data-filter="fire" id="filterFire">
                     <div class="stat-icon">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -123,19 +111,6 @@
                     <div class="stat-info">
                         <span class="stat-value" id="fireCount">0</span>
                         <span class="stat-label">Fire</span>
-                    </div>
-                </button>
-                <button class="stat-card filter-tab stat-police" data-filter="police" id="filterPolice">
-                    <div class="stat-icon">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path
-                                d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" />
-                        </svg>
-                    </div>
-                    <div class="stat-info">
-                        <span class="stat-value" id="policeCount">0</span>
-                        <span class="stat-label">Police</span>
                     </div>
                 </button>
                 <button class="stat-card filter-tab stat-ems" data-filter="ems" id="filterEms">
@@ -215,33 +190,29 @@
                         <line x1="6" y1="20" x2="6" y2="14"></line>
                     </svg>
                 </button>
-                <button class="map-control-btn" id="audioPanelToggle" aria-label="Open Scanner" title="Open Scanner">
+                <button class="map-control-btn" id="audioPanelToggle" aria-label="Audio Feeds" title="Audio Feeds">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                        <line x1="12" y1="19" x2="12" y2="22" />
+                        <path d="M2 12L7 2L12 12L17 2L22 12" />
+                        <path d="M2 17L7 7L12 17L17 7L22 17" opacity="0.5" />
                     </svg>
                 </button>
             </div>
 
-            <!-- OpenMHz Iframe Drawer -->
+            <!-- Audio Pairing Drawer (Future Integration) -->
             <div class="audio-panel-drawer" id="openmhzDrawer">
                 <div class="drawer-header">
-                    <span>OpenMHz Raw Clips</span>
-                    <div>
-                        <a href="https://openmhz.com/system/hamiltonco" target="_blank"
-                            class="drawer-external-link">Open in New Tab</a>
-                        <button id="closeDrawerBtn" class="drawer-close" aria-label="Close">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                <line x1="6" y1="6" x2="18" y2="18"></line>
-                            </svg>
-                        </button>
-                    </div>
+                    <span>Paired Audio Engine</span>
+                    <button id="closeDrawerBtn" class="drawer-close" aria-label="Close">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
                 </div>
-                <iframe src="https://openmhz.com/system/hamiltonco" allow="autoplay" id="openmhzIframe"
-                    title="OpenMHz Scanner"></iframe>
+                <div style="padding: 20px; color: var(--text-secondary); font-size: 0.85rem;">
+                    Paired audio events will appear here as they are processed by the LLM.
+                </div>
             </div>
 
             <!-- Data Insights Modal overlay -->
@@ -266,46 +237,67 @@
                 </div>
             </div>
 
-            <!-- Historical Controls Panel (History Mode) -->
-            <div class="history-panel" id="historyPanel" style="display:none;">
-                <div class="history-controls-left">
-                    <button id="prevDateBtn" class="date-nav-btn" aria-label="Previous Day">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <polyline points="15 18 9 12 15 6"></polyline>
-                        </svg>
-                    </button>
-                    <div class="history-date-display">
-                        <div id="historyDateLabel" class="date-label">Today</div>
-                        <div id="historyDateSub" class="date-sub">Mar 1</div>
+            <!-- Unified Bottom Bar (Timeline + Audio) -->
+            <div class="audio-bar-wrapper" id="audioBarWrapper">
+                <!-- Timeline Section -->
+                <div class="history-panel" id="historyPanel">
+                    <div class="history-controls-left">
+                        <button id="prevDateBtn" class="date-nav-btn" aria-label="Previous Day">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <polyline points="15 18 9 12 15 6"></polyline>
+                            </svg>
+                        </button>
+                        <div class="history-date-display">
+                            <div id="historyDateLabel" class="date-label">Today</div>
+                            <div id="historyDateSub" class="date-sub">Mar 1</div>
+                        </div>
+                        <button id="nextDateBtn" class="date-nav-btn" aria-label="Next Day">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                            </svg>
+                        </button>
                     </div>
-                    <button id="nextDateBtn" class="date-nav-btn" aria-label="Next Day">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <polyline points="9 18 15 12 9 6"></polyline>
-                        </svg>
-                    </button>
+
+                    <div class="history-timeline-container">
+                        <div class="timeline-ticks" id="timelineTicks"></div>
+                        <div class="slider-track">
+                            <div class="slider-fill" id="sliderFill"></div>
+                        </div>
+                        <input type="range" id="historySlider" min="0" max="1440" value="1440"
+                            class="timeline-slider" />
+                        <div class="timeline-labels">
+                            <span>12 AM</span>
+                            <span>4 AM</span>
+                            <span>8 AM</span>
+                            <span>12 PM</span>
+                            <span>4 PM</span>
+                            <span>8 PM</span>
+                        </div>
+                    </div>
+
+                    <div class="history-time-display">
+                        <div id="historyTimeLabel" class="time-label">11:59 PM</div>
+                        <div class="time-sub">TIME</div>
+                    </div>
                 </div>
 
-                <div class="history-timeline-container">
-                    <div class="timeline-ticks" id="timelineTicks"></div>
-                    <div class="slider-track">
-                        <div class="slider-fill" id="sliderFill"></div>
+                <!-- Audio Info Section (Optional/Hidden on small mobile) -->
+                <!-- Audio Pairing Info -->
+                <div class="audio-bar-content" id="audioBarContent">
+                    <div class="audio-info">
+                        <div class="audio-pulse">
+                            <div class="pulse-dot"></div>
+                        </div>
+                        <div class="audio-labels">
+                            <span class="audio-title">Fire/EMS Paired Audio</span>
+                            <span class="audio-subtitle">Monitoring Local Trunked Radio...</span>
+                        </div>
                     </div>
-                    <input type="range" id="historySlider" min="0" max="1440" value="1440" class="timeline-slider" />
-                    <div class="timeline-labels">
-                        <span>12 AM</span>
-                        <span>4 AM</span>
-                        <span>8 AM</span>
-                        <span>12 PM</span>
-                        <span>4 PM</span>
-                        <span>8 PM</span>
+                    <div class="audio-player">
+                        <!-- Audio pairing controls will go here -->
                     </div>
-                </div>
-
-                <div class="history-time-display">
-                    <div id="historyTimeLabel" class="time-label">11:59 PM</div>
-                    <div class="time-sub">TIME</div>
                 </div>
             </div>
         </div>

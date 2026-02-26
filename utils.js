@@ -268,7 +268,7 @@ function normalizeAddress(address) {
     if (!address) return '';
     let clean = address.trim().toUpperCase()
         .replace(/\s+/g, ' ')
-        .replace(/\d+\s+BLK\s+/, '') // Remove "BLK" prefix
+        .replace(/\bBLK\b/g, '') // Remove "BLK" but keep the number
         .replace(/\//g, '&')        // Use & for intersections
         .replace(/\bSR\b/g, 'STATE RD')
         .replace(/\bST RD\b/g, 'STATE RD')
@@ -297,7 +297,7 @@ async function geocodeArcGIS(address, agency) {
 
         // Build query URL
         const params = new URLSearchParams({
-            where: `${field} LIKE '%${queryAddr}%'`,
+            where: `UPPER(${field}) LIKE '%${queryAddr}%'`,
             outFields: '*',
             returnGeometry: 'true',
             outSR: '4326',
@@ -311,6 +311,7 @@ async function geocodeArcGIS(address, agency) {
         let result = null;
 
         if (data.features && data.features.length > 0) {
+            // Sort by match quality if possible, but for now take the first
             const feat = data.features[0];
             result = {
                 lat: feat.geometry.y,
