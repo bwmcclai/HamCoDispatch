@@ -27,6 +27,8 @@
     <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet.heat Plugin -->
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="styles.css">
@@ -71,6 +73,11 @@
             </div>
         </div>
         <div class="top-bar-right">
+            <div class="time-filter-wrapper">
+                <button id="liveModeBtn" class="time-btn active" title="Live Events">LIVE</button>
+                <button id="historyModeBtn" class="time-btn" title="Historical Events">HISTORY</button>
+                <input type="date" id="historyDate" class="history-date-input" style="display:none;" />
+            </div>
             <select id="cityFilter" class="city-select" title="Filter by City">
                 <option value="all">All Hamilton County</option>
                 <option value="Noblesville">Noblesville</option>
@@ -122,6 +129,14 @@
                         <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"></path>
                     </svg>
                 </button>
+                <div class="map-control-divider"></div>
+                <button class="map-control-btn" id="heatmapToggleBtn" aria-label="Toggle Heatmap"
+                    title="Show/hide Heatmap" style="display:none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3" fill="currentColor" />
+                        <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-dasharray="2 2" fill="none" />
+                    </svg>
+                </button>
             </div>
 
             <!-- Audio Panel -->
@@ -143,19 +158,13 @@
                 </div>
                 <div class="audio-panel-body" id="audioPanelBody">
                     <div class="audio-feed-list">
-                        <a href="https://www.broadcastify.com/listen/feed/3332" target="_blank" rel="noopener"
-                            class="audio-feed-item">
-                            <span class="audio-feed-dot fire"></span>
-                            <span class="audio-feed-name">Hamilton County Fire & EMS</span>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                                <polyline points="15 3 21 3 21 9"></polyline>
-                                <line x1="10" y1="14" x2="21" y2="3"></line>
-                            </svg>
-                        </a>
+                        <div class="audio-feed-embed"
+                            style="width:100%; height:50px; overflow:hidden; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                            <iframe src="https://www.broadcastify.com/webPlayer/3332" frameborder="0"
+                                style="width: 100%; height: 50px;" scrolling="no"></iframe>
+                        </div>
                     </div>
-                    <p class="audio-note">Listen via Broadcastify or OpenMHz</p>
+                    <p class="audio-note">Provided by Broadcastify embedded player</p>
                 </div>
             </div>
 

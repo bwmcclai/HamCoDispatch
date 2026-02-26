@@ -1447,3 +1447,52 @@ body {
     font-size: 1.3rem;
     line-height: 1;
 }
+
+/* --- Time Filtering --- */
+.time-filter-wrapper {
+    display: flex;
+    align-items: center;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    margin-right: var(--space-md);
+}
+
+.time-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--duration-fast);
+}
+
+.time-btn:hover:not(.active) {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.time-btn.active {
+    background: var(--text-accent);
+    color: var(--bg-primary);
+}
+
+.history-date-input {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    padding: 4px 8px;
+    margin-left: 4px;
+    border-radius: var(--radius-sm);
+    outline: none;
+    cursor: pointer;
+}
+
+.history-date-input::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+}

@@ -30,6 +30,12 @@ let showStations = false;
 let knownIncidentIds = new Set();
 let isFirstLoad = true;
 
+// ── New Features State ──
+let isHistoryMode = false;
+let historyDate = null;
+let heatLayer = null;
+let showHeatmap = false;
+
 // ── Utility ──
 function timeAgo(date) {
     const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -99,6 +105,16 @@ function initMap() {
         if (showStations) loadFireStations();
         else clearFireStations();
     });
+
+    // Heatmap toggle
+    const heatmapBtn = document.getElementById('heatmapToggleBtn');
+    if (heatmapBtn) {
+        heatmapBtn.addEventListener('click', () => {
+            showHeatmap = !showHeatmap;
+            heatmapBtn.classList.toggle('active', showHeatmap);
+            renderMapLayers();
+        });
+    }
 }
 
 // ── Fire Stations ──
@@ -187,9 +203,35 @@ function removeAllMarkers() {
 }
 
 function updateMarkersVisibility() {
+    if (showHeatmap) {
+        markers.forEach(m => m.setOpacity(0)); // Hidden when heatmap is active
+        return;
+    }
     markers.forEach(m => {
         m.setOpacity(currentFilter === 'all' || m.incidentType === currentFilter ? 1 : 0.12);
     });
+}
+
+function renderMapLayers() {
+    if (heatLayer) {
+        map.removeLayer(heatLayer);
+        heatLayer = null;
+    }
+
+    if (showHeatmap && L.heatLayer) {
+        const heatData = incidents
+            .filter(inc => inc.lat && inc.lng)
+            .filter(inc => currentFilter === 'all' || inc.type === currentFilter)
+            .map(inc => [inc.lat, inc.lng, 1]); // default intensity
+
+        heatLayer = L.heatLayer(heatData, {
+            radius: 20,
+            blur: 15,
+            maxZoom: 14,
+            gradient: { 0.4: 'blue', 0.6: 'cyan', 0.7: 'lime', 0.8: 'yellow', 1.0: 'red' }
+        }).addTo(map);
+    }
+    updateMarkersVisibility();
 }
 
 // ── Data Fetching ──
@@ -204,7 +246,19 @@ async function fetchIncidents() {
         if (cityFilter !== 'all') {
             params.set('city', cityFilter);
         }
-        params.set('limit', '200');
+
+        if (isHistoryMode && historyDate) {
+            const start = new Date(historyDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(historyDate);
+            end.setHours(23, 59, 59, 999);
+            params.set('start', start.toISOString());
+            params.set('end', end.toISOString());
+            params.set('limit', '5000'); // fetch more for historical mode
+        } else {
+            params.set('limit', '200');
+        }
+
         const response = await fetch(`${API_BASE}/api/incidents?${params.toString()}`);
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -231,8 +285,8 @@ async function fetchIncidents() {
         incidents.forEach(inc => createMarker(inc));
         renderMarquee();
         updateStats();
-        updateMarkersVisibility();
-        updateStatusBadge('live');
+        renderMapLayers(); // Update the heatmap and markers
+        updateStatusBadge(isHistoryMode ? 'history' : 'live');
 
         if (!isFirstLoad && newIds.length > 0) flashNewIncidents(newIds);
         isFirstLoad = false;
@@ -270,6 +324,7 @@ function updateStatusBadge(state) {
     const text = badge.querySelector('.status-text');
     const styles = {
         live: { bg: '#4ade80', shadow: 'rgba(74,222,128,0.6)', label: 'LIVE', border: 'rgba(74,222,128,0.2)', bgBadge: 'rgba(74,222,128,0.08)' },
+        history: { bg: '#8b5cf6', shadow: 'rgba(139,92,246,0.6)', label: 'HISTORY', border: 'rgba(139,92,246,0.2)', bgBadge: 'rgba(139,92,246,0.08)' },
         loading: { bg: '#facc15', shadow: 'rgba(250,204,21,0.6)', label: 'UPDATING', border: 'rgba(250,204,21,0.2)', bgBadge: 'rgba(250,204,21,0.08)' },
         error: { bg: '#f87171', shadow: 'rgba(248,113,113,0.6)', label: 'OFFLINE', border: 'rgba(248,113,113,0.2)', bgBadge: 'rgba(248,113,113,0.08)' }
     };
@@ -438,8 +493,70 @@ function initFilters() {
             tab.classList.add('active');
             currentFilter = tab.dataset.filter;
             renderMarquee();
-            updateMarkersVisibility();
+            renderMapLayers(); // Update layers instead of just markers
         });
+    });
+}
+
+function initTimeFilter() {
+    const liveBtn = document.getElementById('liveModeBtn');
+    const historyBtn = document.getElementById('historyModeBtn');
+    const dateInput = document.getElementById('historyDate');
+    const heatmapBtn = document.getElementById('heatmapToggleBtn');
+
+    if (!liveBtn || !historyBtn || !dateInput) return;
+
+    liveBtn.addEventListener('click', () => {
+        isHistoryMode = false;
+        liveBtn.classList.add('active');
+        historyBtn.classList.remove('active');
+        dateInput.style.display = 'none';
+
+        if (heatmapBtn) {
+            heatmapBtn.style.display = 'none';
+            showHeatmap = false;
+            heatmapBtn.classList.remove('active');
+        }
+
+        knownIncidentIds.clear();
+        isFirstLoad = true;
+        fetchIncidents();
+    });
+
+    historyBtn.addEventListener('click', () => {
+        isHistoryMode = true;
+        historyBtn.classList.add('active');
+        liveBtn.classList.remove('active');
+        dateInput.style.display = 'inline-block';
+
+        if (heatmapBtn) {
+            heatmapBtn.style.display = 'inline-flex';
+            showHeatmap = true; // Auto enable heatmap for history
+            heatmapBtn.classList.add('active');
+        }
+
+        if (!dateInput.value) {
+            // Set to yesterday by default when entering history mode
+            const d = new Date();
+            d.setDate(d.getDate() - 1);
+            dateInput.value = d.toISOString().split('T')[0];
+            historyDate = dateInput.value;
+        } else {
+            historyDate = dateInput.value;
+        }
+
+        knownIncidentIds.clear();
+        isFirstLoad = true;
+        fetchIncidents();
+    });
+
+    dateInput.addEventListener('change', (e) => {
+        historyDate = e.target.value;
+        if (isHistoryMode) {
+            knownIncidentIds.clear();
+            isFirstLoad = true;
+            fetchIncidents();
+        }
     });
 }
 
@@ -482,6 +599,7 @@ function updateClock() {
 async function init() {
     initMap();
     initFilters();
+    initTimeFilter();
     initCityFilter();
     initAudioPanel();
     updateClock();
