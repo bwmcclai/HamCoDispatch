@@ -1,0 +1,20 @@
+{
+    "rewrites": [
+        {
+            "source": "/api/incidents",
+            "destination": "/api/incidents"
+        },
+        {
+            "source": "/api/stations",
+            "destination": "/api/incidents"
+        },
+        {
+            "source": "/api/codes",
+            "destination": "/api/incidents"
+        },
+        {
+            "source": "/api/health",
+            "destination": "/api/incidents"
+        }
+    ]
+}

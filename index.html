@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hamilton County Dispatch — Live Fire, Police & EMS Activity</title>
+    <meta name="description"
+        content="Real-time fire, police, and EMS activity map for Hamilton County, Indiana. A fresh, modern way for citizens to monitor live emergency services.">
+    <meta name="keywords"
+        content="Hamilton County, Noblesville, Carmel, Fishers, Westfield, Indiana, fire, police, EMS, emergency, live, map, scanner, siren">
+    <meta name="theme-color" content="#0a0a0f">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Hamilton County Dispatch — Live Emergency Activity">
+    <meta property="og:description"
+        content="A fresh, modern way for Hamilton County, IN citizens to monitor live emergency services.">
+    <meta property="og:type" content="website">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- Ambient Background Glow -->
+    <div class="ambient-glow" id="ambientGlow"></div>
+
+    <!-- Top Navigation Bar -->
+    <header class="top-bar" id="topBar">
+        <div class="top-bar-left">
+            <div class="logo-container">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="16" cy="16" r="14" stroke="url(#logoGrad)" stroke-width="2" fill="none" />
+                        <circle cx="16" cy="16" r="6" fill="url(#logoGrad)" opacity="0.8" />
+                        <circle cx="16" cy="16" r="10" stroke="url(#logoGrad)" stroke-width="1" stroke-dasharray="3 3"
+                            opacity="0.5">
+                            <animateTransform attributeName="transform" type="rotate" from="0 16 16" to="360 16 16"
+                                dur="20s" repeatCount="indefinite" />
+                        </circle>
+                        <defs>
+                            <linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32">
+                                <stop offset="0%" stop-color="#ff6b35" />
+                                <stop offset="50%" stop-color="#f72585" />
+                                <stop offset="100%" stop-color="#7209b7" />
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>HamCo<span class="logo-accent">Dispatch</span></h1>
+                    <p class="logo-subtitle">HAMILTON COUNTY EMERGENCY SERVICES</p>
+                </div>
+            </div>
+        </div>
+        <div class="top-bar-center">
+            <div class="status-badge" id="statusBadge">
+                <span class="status-dot"></span>
+                <span class="status-text">LIVE</span>
+            </div>
+        </div>
+        <div class="top-bar-right">
+            <div class="scope-toggle-container">
+                <span class="scope-label" id="scopeLabel">All Hamilton County</span>
+                <label class="toggle-switch" title="Toggle between Noblesville only and all Hamilton County">
+                    <input type="checkbox" id="scopeToggle" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="divider-v"></div>
+            <div class="clock" id="clock"></div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Map Container -->
+        <div class="map-wrapper" id="mapWrapper">
+            <div id="map"></div>
+            <!-- Map Overlay Controls -->
+            <div class="map-controls">
+                <button class="map-control-btn" id="zoomInBtn" aria-label="Zoom in">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button class="map-control-btn" id="zoomOutBtn" aria-label="Zoom out">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="map-control-divider"></div>
+                <button class="map-control-btn" id="recenterBtn" aria-label="Re-center map">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path>
+                    </svg>
+                </button>
+                <div class="map-control-divider"></div>
+                <button class="map-control-btn" id="stationsToggleBtn" aria-label="Toggle fire stations"
+                    title="Show/hide fire stations">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Audio Panel -->
+            <div class="audio-panel" id="audioPanel">
+                <div class="audio-panel-header" id="audioPanelToggle">
+                    <div class="audio-panel-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="23"></line>
+                        </svg>
+                        <span>Scanner Audio</span>
+                    </div>
+                    <svg class="audio-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+                <div class="audio-panel-body" id="audioPanelBody">
+                    <div class="audio-feed-list">
+                        <a href="https://www.broadcastify.com/listen/feed/21798" target="_blank" rel="noopener"
+                            class="audio-feed-item">
+                            <span class="audio-feed-dot fire"></span>
+                            <span class="audio-feed-name">Hamilton County Fire & EMS</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </a>
+                        <a href="https://www.broadcastify.com/listen/ctid/1367" target="_blank" rel="noopener"
+                            class="audio-feed-item">
+                            <span class="audio-feed-dot police"></span>
+                            <span class="audio-feed-name">Hamilton County Police</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </a>
+                        <a href="https://www.openmhz.com/system/hamcofire" target="_blank" rel="noopener"
+                            class="audio-feed-item">
+                            <span class="audio-feed-dot ems"></span>
+                            <span class="audio-feed-name">OpenMHz Archive</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </a>
+                    </div>
+                    <p class="audio-note">Listen via Broadcastify or OpenMHz</p>
+                </div>
+            </div>
+
+            <!-- Map Legend -->
+            <div class="map-legend">
+                <div class="legend-item">
+                    <span class="legend-dot legend-fire"></span>
+                    <span>Fire</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot legend-police"></span>
+                    <span>Police</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot legend-ems"></span>
+                    <span>EMS</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Side Panel -->
+        <aside class="side-panel" id="sidePanel">
+            <!-- Stats Row -->
+            <div class="stats-row">
+                <div class="stat-card stat-fire">
+                    <div class="stat-icon">🔥</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="fireCount">0</span>
+                        <span class="stat-label">Fire</span>
+                    </div>
+                </div>
+                <div class="stat-card stat-police">
+                    <div class="stat-icon">🚔</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="policeCount">0</span>
+                        <span class="stat-label">Police</span>
+                    </div>
+                </div>
+                <div class="stat-card stat-ems">
+                    <div class="stat-icon">🚑</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="emsCount">0</span>
+                        <span class="stat-label">EMS</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter Tabs -->
+            <div class="filter-tabs">
+                <button class="filter-tab active" data-filter="all" id="filterAll">
+                    <span class="filter-dot filter-all-dot"></span>
+                    All
+                </button>
+                <button class="filter-tab" data-filter="fire" id="filterFire">
+                    <span class="filter-dot filter-fire-dot"></span>
+                    Fire
+                </button>
+                <button class="filter-tab" data-filter="police" id="filterPolice">
+                    <span class="filter-dot filter-police-dot"></span>
+                    Police
+                </button>
+                <button class="filter-tab" data-filter="ems" id="filterEms">
+                    <span class="filter-dot filter-ems-dot"></span>
+                    EMS
+                </button>
+            </div>
+
+            <!-- Incident Feed -->
+            <div class="incident-feed" id="incidentFeed">
+                <!-- Incidents will be dynamically populated -->
+            </div>
+
+            <!-- Feed Footer -->
+            <div class="feed-footer">
+                <p>Data sourced from Hamilton County, IN</p>
+                <a href="https://secure2.hamiltoncounty.in.gov/DailyIncidents/" target="_blank"
+                    rel="noopener noreferrer">View Official Feed →</a>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Incident Detail Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal" id="incidentModal">
+            <button class="modal-close" id="modalClose" aria-label="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+            <div class="modal-header">
+                <div class="modal-badge" id="modalBadge">FIRE</div>
+                <h2 class="modal-title" id="modalTitle">Structure Fire</h2>
+                <p class="modal-time" id="modalTime">2 minutes ago</p>
+            </div>
+            <div class="modal-body">
+                <div class="modal-detail">
+                    <span class="modal-detail-label">Location</span>
+                    <span class="modal-detail-value" id="modalLocation">—</span>
+                </div>
+                <div class="modal-detail">
+                    <span class="modal-detail-label">Agency</span>
+                    <span class="modal-detail-value" id="modalUnits">—</span>
+                </div>
+                <div class="modal-detail">
+                    <span class="modal-detail-label">Incident #</span>
+                    <span class="modal-detail-value" id="modalStatus">—</span>
+                </div>
+                <div class="modal-detail">
+                    <span class="modal-detail-label">Reported</span>
+                    <span class="modal-detail-value" id="modalReported">--</span>
+                </div>
+            </div>
+            <div class="modal-map-preview" id="modalMapPreview"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="app.js"></script>
+</body>
+
+</html>
