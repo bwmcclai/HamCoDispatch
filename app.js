@@ -354,9 +354,9 @@ async function fetchIncidents() {
             params.set('limit', '5000'); // fetch more for historical mode
         } else {
             const start = new Date();
-            start.setHours(start.getHours() - 6); // Drastic reduction: 6h instead of 24h
+            start.setHours(start.getHours() - 2); // Reduced from 6h to 2h for faster initial load
             params.set('start', start.toISOString());
-            params.set('limit', '500');
+            params.set('limit', '200'); // Reduced from 500 to 200
         }
 
         const response = await fetch(`${API_BASE}/api/incidents?${params.toString()}`);

@@ -96,13 +96,23 @@ async function fetchIncidentsFallback() {
     }
 }
 
+// ── Supabase Query Cache ──
+let supabaseCache = null;
+let supabaseCacheTime = 0;
+const SB_CACHE_TTL = 30 * 1000;
+
 app.get('/api/incidents', async (req, res) => {
     let result = [];
+    const { start, end, limit = 500, agency, city, type } = req.query;
 
     // Check if we have Supabase connected
     if (supabase) {
         try {
-            const { start, end, limit = 500 } = req.query;
+            // Simple cache for requests without specific filters
+            if (!agency && !city && !type && Date.now() - supabaseCacheTime < SB_CACHE_TTL && supabaseCache) {
+                return res.json(supabaseCache);
+            }
+
             let query = supabase.from('incidents').select('*').order('timestamp', { ascending: false }).limit(limit);
 
             if (start) query = query.gte('timestamp', new Date(start).toISOString());
@@ -111,24 +121,9 @@ app.get('/api/incidents', async (req, res) => {
             const { data, error } = await query;
             if (error) throw error;
 
-            let geocodeCount = 0;
-            const MAX_GEOCODE_PER_REQ = 10;
-
-            result = await Promise.all((data || []).map(async (inc) => {
+            result = (data || []).map((inc) => {
                 if (inc.lat === null || inc.lng === null) {
-                    let coords = null;
-
-                    // Only attempt high-accuracy ArcGIS for a limited number of missing items per request
-                    if (geocodeCount < MAX_GEOCODE_PER_REQ) {
-                        coords = await geocodeArcGIS(inc.address, inc.agency);
-                        if (coords && coords.accuracy === 'high') geocodeCount++;
-                    }
-
-                    // Always fallback to fast parseAddress if ArcGIS was skipped or failed
-                    if (!coords) {
-                        coords = parseAddress(inc.address, inc.agency);
-                    }
-
+                    const coords = parseAddress(inc.address, inc.agency);
                     if (coords) {
                         inc.lat = coords.lat;
                         inc.lng = coords.lng;
@@ -137,17 +132,12 @@ app.get('/api/incidents', async (req, res) => {
                     }
                 }
                 return inc;
-            }));
+            });
         } catch (e) {
-            console.error("Supabase query error, falling back:", e.message);
-            // Fall back to memory if DB query fails
-            if (Date.now() - lastFetchTime > CACHE_DURATION_MS) await fetchIncidentsFallback();
             result = [...cachedIncidents];
         }
     } else {
-        if (Date.now() - lastFetchTime > CACHE_DURATION_MS || cachedIncidents.length === 0) {
-            await fetchIncidentsFallback();
-        }
+        // Serve instantly from background memory cache
         result = [...cachedIncidents];
 
         // Manual start/end filtering for in-memory cache
@@ -173,7 +163,15 @@ app.get('/api/incidents', async (req, res) => {
         result = result.slice(0, lim);
     }
 
-    res.json({ success: true, count: result.length, lastUpdated: new Date().toISOString(), incidents: result });
+    const responseData = { success: true, count: result.length, lastUpdated: new Date().toISOString(), incidents: result };
+
+    // Update cache if no filters were applied
+    if (!agency && !city && !type && supabase) {
+        supabaseCache = responseData;
+        supabaseCacheTime = Date.now();
+    }
+
+    res.json(responseData);
 });
 
 app.get('/api/stations', (req, res) => res.json({ success: true, stations: FIRE_STATIONS }));
@@ -181,14 +179,28 @@ app.get('/api/codes', (req, res) => res.json({ success: true, codes: TEN_CODES }
 app.get('/api/health', (req, res) => res.json({ status: 'ok', usingSupabase: !!supabase, cachedIncidents: cachedIncidents.length, uptime: process.uptime() }));
 app.get('/{*splat}', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
+// Helper to ensure database is optimized
+async function ensureDbOptimized() {
+    if (!supabase) return;
+    try {
+        console.log("Checking database optimization...");
+        // This is a hint - we can't reliably run raw SQL through the standard client
+        // but we can sanity check the connection.
+        const { error } = await supabase.from('incidents').select('id').limit(1);
+        if (error) console.error("Database check failed:", error.message);
+        else console.log("Database connection healthy.");
+    } catch (e) { }
+}
+
 if (require.main === module) {
     app.listen(PORT, async () => {
         console.log(`\n🚨 Hamilton County Dispatch API running on http://localhost:${PORT}`);
-        if (!supabase) {
-            console.log(`   Supabase not configured, fetching live data into cache...\n`);
-            await fetchIncidentsFallback();
-            setInterval(fetchIncidentsFallback, CACHE_DURATION_MS);
-        }
+        ensureDbOptimized();
+
+        // Initial fetch for background cache
+        await fetchIncidentsFallback();
+        // Keep memory cache fresh every minute (this handles both Supabase downtime and no-Supabase mode)
+        setInterval(fetchIncidentsFallback, CACHE_DURATION_MS);
     });
 }
 module.exports = app;
