@@ -201,40 +201,53 @@
 
 
 
-            <!-- Map Legend -->
-            <div class="map-legend">
-                <div class="legend-item">
-                    <span class="legend-dot legend-fire"></span>
-                    <span>Fire</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-dot legend-police"></span>
-                    <span>Police</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-dot legend-ems"></span>
-                    <span>EMS</span>
-                </div>
-            </div>
+
 
 
             <!-- Bottom Audio Bar (Live Mode) -->
             <div class="audio-bar-wrapper" id="audioBarWrapper">
+
+                <!-- OpenMHz Iframe Drawer -->
+                <div class="audio-panel-drawer" id="openmhzDrawer">
+                    <div class="drawer-header">
+                        <span>OpenMHz Raw Clips</span>
+                        <div>
+                            <a href="https://openmhz.com/system/hamiltonco" target="_blank"
+                                class="drawer-external-link">Open in New Tab</a>
+                            <button id="closeDrawerBtn" class="drawer-close" aria-label="Close">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <iframe src="https://openmhz.com/system/hamiltonco" allow="autoplay" id="openmhzIframe"
+                        title="OpenMHz Scanner"></iframe>
+                </div>
+
                 <div class="audio-bar-content">
                     <div class="audio-info">
                         <div class="audio-pulse">
                             <span class="pulse-dot"></span>
                         </div>
                         <div class="audio-labels">
-                            <div class="audio-title">Hamilton County Dispatch</div>
-                            <div class="audio-subtitle">Live Fire & EMS Scanner Audio</div>
-                            <div class="audio-disclaimer">Note: Initial ad may play from source</div>
+                            <div class="audio-title">Hamilton County Radio</div>
+                            <div class="audio-subtitle">Raw Scanner Audio Clips (OpenMHz)</div>
+                            <div class="audio-disclaimer" id="audioDisclaimer">Real-time unit transmissions</div>
                         </div>
                     </div>
                     <div class="audio-player">
-                        <audio controls>
-                            <source src="https://broadcastify.cdnstream1.com/3332" type="audio/mpeg">
-                        </audio>
+                        <button id="audioPanelToggle" class="scanner-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" style="margin-right:8px;vertical-align:middle;">
+                                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                                <line x1="12" y1="19" x2="12" y2="22" />
+                            </svg>
+                            Open Scanner
+                        </button>
                     </div>
                 </div>
             </div>
