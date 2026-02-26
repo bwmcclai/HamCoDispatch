@@ -1,4 +1,22 @@
 {
+    "builds": [
+        {
+            "src": "api/incidents.js",
+            "use": "@vercel/node"
+        },
+        {
+            "src": "index.html",
+            "use": "@vercel/static"
+        },
+        {
+            "src": "styles.css",
+            "use": "@vercel/static"
+        },
+        {
+            "src": "app.js",
+            "use": "@vercel/static"
+        }
+    ],
     "rewrites": [
         {
             "source": "/api/incidents",
